@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../types';
+import { message } from '../services/message';
 import ChatInput from './ChatInput';
 import Icon from './Icons';
 
@@ -80,6 +81,7 @@ export default function ChatWindow({
   onOpenModelPicker,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
+  const lastErrorMessageRef = useRef('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [typedWelcomeTitle, setTypedWelcomeTitle] = useState('');
 
@@ -145,6 +147,24 @@ export default function ChatWindow({
     return () => window.clearInterval(timer);
   }, [showEmpty]);
 
+  useEffect(() => {
+    if (!errorMessage) {
+      lastErrorMessageRef.current = '';
+      return;
+    }
+
+    if (lastErrorMessageRef.current === errorMessage) {
+      return;
+    }
+
+    lastErrorMessageRef.current = errorMessage;
+
+    message.error({
+      content: errorMessage,
+      placement: 'top',
+    });
+  }, [errorMessage]);
+
   return (
     <main className="chat-stage">
       <button
@@ -156,8 +176,6 @@ export default function ChatWindow({
         <span>{currentModelLabel}</span>
         <Icon name="arrow-down" />
       </button>
-
-      {errorMessage && <div className="stage-error-banner">{errorMessage}</div>}
 
       {showEmpty ? (
         <section className="welcome-stage">

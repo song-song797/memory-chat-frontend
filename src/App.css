@@ -1185,6 +1185,24 @@
   align-items: stretch;
 }
 
+.welcome-message-demo {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.welcome-message-demo button {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(34, 34, 38, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #2a2a31;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .welcome-stack {
   display: flex;
   flex-direction: column;
@@ -1863,6 +1881,212 @@
 .social-button svg {
   width: 24px;
   height: 24px;
+}
+
+.message-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.message-stack {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  max-width: min(calc(100vw - 24px), 460px);
+  pointer-events: none;
+}
+
+.message-stack.is-bottom {
+  flex-direction: column-reverse;
+}
+
+.message-stack--top {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+
+.message-stack--top-left {
+  top: 12px;
+  left: 12px;
+  align-items: flex-start;
+}
+
+.message-stack--top-right {
+  top: 12px;
+  right: 12px;
+  align-items: flex-end;
+}
+
+.message-stack--bottom {
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+
+.message-stack--bottom-left {
+  bottom: 12px;
+  left: 12px;
+  align-items: flex-start;
+}
+
+.message-stack--bottom-right {
+  bottom: 12px;
+  right: 12px;
+  align-items: flex-end;
+}
+
+.message-item {
+  overflow: hidden;
+  max-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  will-change: max-height, opacity, transform, padding;
+  transition:
+    max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    padding 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.message-item.is-top {
+  transform: translate3d(0, -24px, 0);
+}
+
+.message-item.is-bottom {
+  transform: translate3d(0, 24px, 0);
+}
+
+.message-item.is-visible {
+  max-height: 96px;
+  padding: 6px 0;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0);
+}
+
+.message-item.is-top.is-closing {
+  max-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(0, -24px, 0);
+}
+
+.message-item.is-bottom.is-closing {
+  max-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(0, 24px, 0);
+}
+
+.message-card {
+  width: fit-content;
+  max-width: min(calc(100vw - 24px), 560px);
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.message-card--primary {
+  border-color: #d6e8ff;
+  background: #eef6ff;
+  color: #3a8bfd;
+}
+
+.message-card--success {
+  border-color: #d7f0c8;
+  background: #f0fae8;
+  color: #63c236;
+}
+
+.message-card--warning {
+  border-color: #f6e2bf;
+  background: #fff8ec;
+  color: #e59d2d;
+}
+
+.message-card--info {
+  border-color: #e3e3e8;
+  background: #f4f4f6;
+  color: #8f929d;
+}
+
+.message-card--error {
+  border-color: #f6d9db;
+  background: #fff0f0;
+  color: #ff6662;
+}
+
+.message-card-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.message-card-icon--primary {
+  color: #4a95ff;
+}
+
+.message-card-icon--success {
+  color: #6ac43b;
+}
+
+.message-card-icon--warning {
+  color: #e59d2d;
+}
+
+.message-card-icon--info {
+  color: #9d9fa8;
+}
+
+.message-card-icon--error {
+  color: #ff6662;
+}
+
+.message-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.message-card-content {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: center;
+  word-break: break-word;
+}
+
+.message-card-close {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.76;
+  flex-shrink: 0;
+}
+
+.message-card-close svg {
+  width: 14px;
+  height: 14px;
 }
 
 @media (max-width: 1180px) {

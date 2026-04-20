@@ -18,7 +18,8 @@ async function getErrorMessage(res: Response, fallback: string): Promise<string>
 export async function fetchConversations(): Promise<Conversation[]> {
   const res = await fetch(`${API_BASE}/conversations`);
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res, 'Failed to fetch conversations'));
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch conversations');
+    throw new Error(errorMessage);
   }
   return res.json();
 }
@@ -26,7 +27,8 @@ export async function fetchConversations(): Promise<Conversation[]> {
 export async function fetchModels(): Promise<ModelCatalog> {
   const res = await fetch(`${API_BASE}/models`);
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res, 'Failed to fetch models'));
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch models');
+    throw new Error(errorMessage);
   }
   return res.json();
 }
@@ -34,7 +36,8 @@ export async function fetchModels(): Promise<ModelCatalog> {
 export async function fetchMessages(conversationId: string): Promise<Message[]> {
   const res = await fetch(`${API_BASE}/conversations/${conversationId}/messages`);
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res, 'Failed to fetch messages'));
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch messages');
+    throw new Error(errorMessage);
   }
   return res.json();
 }
@@ -44,7 +47,8 @@ export async function deleteConversation(conversationId: string): Promise<void> 
     method: 'DELETE',
   });
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res, 'Failed to delete conversation'));
+    const errorMessage = await getErrorMessage(res, 'Failed to delete conversation');
+    throw new Error(errorMessage);
   }
 }
 
@@ -58,7 +62,8 @@ export async function updateConversationTitle(
     body: JSON.stringify({ title }),
   });
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res, 'Failed to update conversation'));
+    const errorMessage = await getErrorMessage(res, 'Failed to update conversation');
+    throw new Error(errorMessage);
   }
   return res.json();
 }
@@ -88,7 +93,8 @@ export async function sendMessage(
   });
 
   if (!res.ok) {
-    onError(await getErrorMessage(res, 'Failed to send message'));
+    const errorMessage = await getErrorMessage(res, 'Failed to send message');
+    onError(errorMessage);
     return;
   }
 
