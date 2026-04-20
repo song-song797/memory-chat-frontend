@@ -342,6 +342,7 @@ export default function App() {
         </div>
       </div>
       <ChatWindow
+        conversationId={activeConvId}
         messages={messages}
         streamingContent={streamingContent}
         isStreaming={isStreaming}

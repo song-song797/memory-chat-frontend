@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,7 @@ import ChatInput from './ChatInput';
 import Icon from './Icons';
 
 interface ChatWindowProps {
+  conversationId: string | null;
   messages: Message[];
   streamingContent: string;
   isStreaming: boolean;
@@ -65,6 +66,7 @@ const featureCards = [
 ];
 
 const WELCOME_TITLE = 'Good day! How may I assist you today?';
+const AUTO_SCROLL_THRESHOLD = 80;
 
 function normalizeMarkdownContent(content: string) {
   let normalized = content;
@@ -91,6 +93,7 @@ function MarkdownMessage({ content }: { content: string }) {
 }
 
 export default function ChatWindow({
+  conversationId,
   messages,
   streamingContent,
   isStreaming,
@@ -102,6 +105,10 @@ export default function ChatWindow({
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const lastErrorMessageRef = useRef('');
+  const previousConversationIdRef = useRef<string | null>(conversationId);
+  const pendingConversationScrollRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [typedWelcomeTitle, setTypedWelcomeTitle] = useState('');
 
@@ -122,14 +129,56 @@ export default function ChatWindow({
   };
 
   useEffect(() => {
+    if (previousConversationIdRef.current === conversationId) return;
+
+    previousConversationIdRef.current = conversationId;
+    pendingConversationScrollRef.current = true;
+  }, [conversationId]);
+
+  useLayoutEffect(() => {
     const container = messagesRef.current;
     if (!container) return;
+
+    if (pendingConversationScrollRef.current) {
+      container.scrollTop = container.scrollHeight;
+      shouldAutoScrollRef.current = true;
+      pendingConversationScrollRef.current = false;
+      return;
+    }
+
+    if (!shouldAutoScrollRef.current) {
+      return;
+    }
 
     container.scrollTo({
       top: container.scrollHeight,
       behavior: isStreaming ? 'auto' : 'smooth',
     });
   }, [messages, streamingContent, isStreaming]);
+
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const currentScrollTop = container.scrollTop;
+      const distanceToBottom =
+        container.scrollHeight - currentScrollTop - container.clientHeight;
+
+      if (isStreaming && currentScrollTop < lastScrollTopRef.current) {
+        shouldAutoScrollRef.current = false;
+      } else if (distanceToBottom <= AUTO_SCROLL_THRESHOLD) {
+        shouldAutoScrollRef.current = true;
+      }
+
+      lastScrollTopRef.current = currentScrollTop;
+    };
+
+    handleScroll();
+    container.addEventListener('scroll', handleScroll);
+
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [isStreaming]);
 
   useEffect(() => {
     if (!isStreaming || !streamingStartedAt) {

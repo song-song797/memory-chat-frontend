@@ -22,6 +22,16 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
     element.scrollTop = element.scrollHeight;
   }, [maxTextareaHeight, text]);
 
+  useEffect(() => {
+    if (disabled) return;
+
+    const timer = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(timer);
+  }, [disabled]);
+
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
