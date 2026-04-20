@@ -9,15 +9,18 @@ interface ChatInputProps {
 export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const maxTextareaHeight = 220;
 
   useEffect(() => {
     const element = textareaRef.current;
     if (!element) return;
 
     element.style.height = 'auto';
-    element.style.height = `${Math.min(element.scrollHeight, 110)}px`;
+    element.style.height = `${Math.min(element.scrollHeight, maxTextareaHeight)}px`;
+    element.style.overflowY =
+      element.scrollHeight > maxTextareaHeight ? 'auto' : 'hidden';
     element.scrollTop = element.scrollHeight;
-  }, [text]);
+  }, [maxTextareaHeight, text]);
 
   const handleSend = () => {
     const trimmed = text.trim();
@@ -36,28 +39,32 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   return (
     <div className="composer-wrap">
       <div className="composer-surface">
-        <button type="button" className="composer-orb composer-orb-left" aria-label="Mood">
-          <Icon name="paperclip" />
-        </button>
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="What's in your mind?..."
-          rows={1}
-          disabled={disabled}
-        />
-        
-        <button
-          type="button"
-          className="composer-send-button"
-          onClick={handleSend}
-          disabled={disabled || !text.trim()}
-          aria-label="Send message"
-        >
-          <Icon name="send" />
-        </button>
+        <div className="composer-input-row">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="What's in your mind?..."
+            rows={1}
+            disabled={disabled}
+          />
+        </div>
+        <div className="composer-toolbar">
+          <button type="button" className="composer-orb composer-orb-left" aria-label="Mood">
+            <Icon name="paperclip" />
+          </button>
+          <span className="composer-toolbar-spacer" />
+          <button
+            type="button"
+            className="composer-send-button"
+            onClick={handleSend}
+            disabled={disabled || !text.trim()}
+            aria-label="Send message"
+          >
+            <Icon name="send" />
+          </button>
+        </div>
       </div>
     </div>
   );

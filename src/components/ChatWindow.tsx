@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import type { Message } from '../types';
 import { message } from '../services/message';
 import ChatInput from './ChatInput';
@@ -64,9 +66,27 @@ const featureCards = [
 
 const WELCOME_TITLE = 'Good day! How may I assist you today?';
 
+function normalizeMarkdownContent(content: string) {
+  let normalized = content;
+
+  // CommonMark 对 **“中文引号包裹的粗体”** 这类写法兼容较差，
+  // 把引号移到 strong 外侧后可以稳定渲染。
+  normalized = normalized.replace(/\*\*“([^*]+?)”\*\*/g, '“**$1**”');
+  normalized = normalized.replace(/\*\*"([^*]+?)"\*\*/g, '"**$1**"');
+  normalized = normalized.replace(/\*\*‘([^*]+?)’\*\*/g, '‘**$1**’');
+  normalized = normalized.replace(/\*\*'([^*]+?)'\*\*/g, "'**$1**'");
+
+  return normalized;
+}
+
 function MarkdownMessage({ content }: { content: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+    >
+      {normalizeMarkdownContent(content)}
+    </ReactMarkdown>
   );
 }
 

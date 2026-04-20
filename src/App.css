@@ -248,7 +248,7 @@
   border-radius: 999px;
   background: linear-gradient(135deg, #4f63ff, #6263eb);
   color: #ffffff;
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -1313,17 +1313,18 @@
 }
 
 .composer-wrap {
-  width: min(100%, 572px);
+  width: min(100%, 760px);
   margin: 0 auto;
 }
 
 .composer-surface {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   min-height: 58px;
   padding: 10px 14px;
-  border-radius: 999px;
+  border-radius: 30px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.76),
@@ -1331,22 +1332,52 @@
     0 2px 8px rgba(128, 94, 125, 0.04);
 }
 
+.composer-input-row {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+}
+
 .composer-surface textarea {
-  flex: 1;
-  max-height: 110px;
+  width: 100%;
+  min-height: 38px;
+  max-height: 220px;
+  padding: 8px 6px;
   border: none;
   outline: none;
   resize: none;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: hidden;
   background: transparent;
+  box-sizing: border-box;
   color: #2b2b31;
   font: inherit;
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 18px;
+  line-height: 1.68;
+  font-weight: 400;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 145, 182, 0.45) transparent;
 }
 
 .composer-surface textarea::placeholder {
   color: #b1b1b7;
+}
+
+.composer-surface textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+.composer-surface textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.composer-surface textarea::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(140, 145, 182, 0.38);
+}
+
+.composer-surface textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 145, 182, 0.52);
 }
 
 .composer-orb,
@@ -1357,6 +1388,18 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 38px;
+  padding: 0 6px;
+}
+
+.composer-toolbar-spacer {
+  flex: 1;
 }
 
 .composer-orb {
@@ -2404,7 +2447,7 @@
   }
 
   .composer-surface textarea {
-    font-size: 13px;
+    font-size: 18px;
   }
 
   .sign-hero {
