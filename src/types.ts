@@ -1,8 +1,18 @@
+export interface Attachment {
+  id: string;
+  name: string;
+  mime_type: string;
+  kind: 'image' | 'file';
+  size_bytes: number;
+  content_url: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   created_at: string;
+  attachments?: Attachment[];
 }
 
 export interface Conversation {
@@ -14,6 +24,22 @@ export interface Conversation {
 
 export interface ConversationDetail extends Conversation {
   messages: Message[];
+}
+
+export interface User {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
+}
+
+export interface LandingAgentMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export type ReasoningMode = 'none' | 'toggle' | 'budget' | 'always_budget';
@@ -30,4 +56,14 @@ export interface ModelOption {
 export interface ModelCatalog {
   default_model: string;
   models: ModelOption[];
+}
+
+export interface ComposerAttachment {
+  id: string;
+  file: File;
+  name: string;
+  mime_type: string;
+  kind: 'image' | 'file';
+  size_bytes: number;
+  preview_url?: string;
 }

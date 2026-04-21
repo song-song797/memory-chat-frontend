@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import type { Message } from '../types';
+import type { Attachment, ComposerAttachment, Message } from '../types';
 import { message } from '../services/message';
 import ChatInput from './ChatInput';
 import Icon from './Icons';
@@ -16,7 +16,7 @@ interface ChatWindowProps {
   streamingStartedAt: number | null;
   errorMessage: string;
   currentModelLabel: string;
-  onSend: (message: string) => void;
+  onSend: (payload: { message: string; attachments: ComposerAttachment[] }) => void;
   onStopStreaming: () => void;
   onOpenModelPicker: () => void;
 }
@@ -129,14 +129,20 @@ const THREAD_ACTIONS: ThreadActionConfig[] = [
 function normalizeMarkdownContent(content: string) {
   let normalized = content;
 
-  // CommonMark 对 **“中文引号包裹的粗体”** 这类写法兼容较差，
-  // 把引号移到 strong 外侧后可以稳定渲染。
-  normalized = normalized.replace(/\*\*“([^*]+?)”\*\*/g, '“**$1**”');
   normalized = normalized.replace(/\*\*"([^*]+?)"\*\*/g, '"**$1**"');
-  normalized = normalized.replace(/\*\*‘([^*]+?)’\*\*/g, '‘**$1**’');
   normalized = normalized.replace(/\*\*'([^*]+?)'\*\*/g, "'**$1**'");
+  normalized = normalized.replace(/\*\*“([^*]+?)”\*\*/g, '“**$1**”');
+  normalized = normalized.replace(/\*\*‘([^*]+?)’\*\*/g, '‘**$1**’');
 
   return normalized;
+}
+
+function formatAttachmentSize(sizeBytes: number) {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
 }
 
 function MarkdownMessage({ content }: { content: string }) {
@@ -147,6 +153,57 @@ function MarkdownMessage({ content }: { content: string }) {
     >
       {normalizeMarkdownContent(content)}
     </ReactMarkdown>
+  );
+}
+
+function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  const imageAttachments = attachments.filter((attachment) => attachment.kind === 'image');
+  const fileAttachments = attachments.filter((attachment) => attachment.kind !== 'image');
+
+  return (
+    <div className="thread-attachments">
+      {imageAttachments.length > 0 ? (
+        <div className="thread-image-grid">
+          {imageAttachments.map((attachment) => (
+            <a
+              key={attachment.id}
+              className="thread-image-card"
+              href={attachment.content_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <img src={attachment.content_url} alt={attachment.name} />
+            </a>
+          ))}
+        </div>
+      ) : null}
+      {fileAttachments.length > 0 ? (
+        <div className="thread-file-list">
+          {fileAttachments.map((attachment) => (
+            <a
+              key={attachment.id}
+              className="thread-file-card"
+              href={attachment.content_url}
+              target="_blank"
+              rel="noreferrer"
+              download={attachment.name}
+            >
+              <span className="thread-file-icon">
+                <Icon name="link" />
+              </span>
+              <span className="thread-file-copy">
+                <strong>{attachment.name}</strong>
+                <span>{formatAttachmentSize(attachment.size_bytes)}</span>
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -215,7 +272,7 @@ export default function ChatWindow({
         showActionFeedback(messageId, 'copy');
       } catch {
         message.error({
-          content: 'Failed to copy answer',
+          content: 'Failed to copy message',
           placement: 'top',
         });
       }
@@ -405,67 +462,93 @@ export default function ChatWindow({
         <div className="thread-shell">
           <div className="thread-scroll" ref={messagesRef}>
             <div className="thread-inner">
-              {messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`thread-entry ${message.role === 'assistant' ? 'is-assistant' : 'is-user'}`}
-                >
-                  {message.role === 'user' && (
-                    <div className="thread-head is-user">
-                      <div className="thread-userline is-user">
-                        <span className="thread-prompt thread-prompt--user">{message.content}</span>
-                      </div>
-                    </div>
-                  )}
+              {messages.map((item) => {
+                const isCopied =
+                  activeActionFeedback?.messageId === item.id &&
+                  activeActionFeedback.action === 'copy';
+                const attachments = item.attachments ?? [];
+                const hasUserText = item.content.trim().length > 0;
 
-                  {message.role === 'assistant' && (
-                    <div className="thread-answer-card">
-                      <div className="thread-label-row">
-                        <span className="thread-brand-label">CHAT A.I+</span>
-                        <span className="thread-brand-badge" />
+                return (
+                  <article
+                    key={item.id}
+                    className={`thread-entry ${item.role === 'assistant' ? 'is-assistant' : 'is-user'}`}
+                  >
+                    {item.role === 'user' && (
+                      <div className="thread-user-block">
+                        {hasUserText ? (
+                          <div className="thread-head is-user">
+                            <div className="thread-userline is-user">
+                              <span className="thread-prompt thread-prompt--user">{item.content}</span>
+                            </div>
+                          </div>
+                        ) : null}
+                        <AttachmentGallery attachments={attachments} />
+                        {hasUserText ? (
+                          <div className="thread-user-footer">
+                            <button
+                              type="button"
+                              className={`thread-user-copy-button ${isCopied ? 'is-active' : ''}`}
+                              aria-label={isCopied ? 'Copied' : 'Copy message'}
+                              data-tooltip={isCopied ? '' : 'Copy'}
+                              onClick={() => void handleCopy(item.id, item.content)}
+                            >
+                              <Icon name={isCopied ? 'check-circle' : 'copy'} />
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="thread-answer-body">
-                        <MarkdownMessage content={message.content} />
-                      </div>
-                      <div className="thread-answer-footer">
-                        <div className="thread-actions">
-                          {THREAD_ACTIONS.map((action) => {
-                            const isActive =
-                              activeActionFeedback?.messageId === message.id &&
-                              activeActionFeedback.action === action.key;
-                            const tooltip = isActive ? '' : action.tooltip;
-                            const iconName =
-                              isActive && action.activeIcon ? action.activeIcon : action.icon;
-                            const ariaLabel =
-                              isActive && action.activeAriaLabel
-                                ? action.activeAriaLabel
-                                : action.ariaLabel;
+                    )}
 
-                            const handleClick = () => {
-                              if (action.key === 'copy') {
-                                return void handleCopy(message.id, message.content);
-                              }
-                            };
+                    {item.role === 'assistant' && (
+                      <div className="thread-answer-card">
+                        <div className="thread-label-row">
+                          <span className="thread-brand-label">CHAT A.I+</span>
+                          <span className="thread-brand-badge" />
+                        </div>
+                        <div className="thread-answer-body">
+                          <MarkdownMessage content={item.content} />
+                        </div>
+                        <div className="thread-answer-footer">
+                          <div className="thread-actions">
+                            {THREAD_ACTIONS.map((action) => {
+                              const isActive =
+                                activeActionFeedback?.messageId === item.id &&
+                                activeActionFeedback.action === action.key;
+                              const tooltip = isActive ? '' : action.tooltip;
+                              const iconName =
+                                isActive && action.activeIcon ? action.activeIcon : action.icon;
+                              const ariaLabel =
+                                isActive && action.activeAriaLabel
+                                  ? action.activeAriaLabel
+                                  : action.ariaLabel;
 
-                            return (
-                              <button
-                                key={action.key}
-                                type="button"
-                                className={`thread-action-pill ${isActive ? 'is-active' : ''}`}
-                                aria-label={ariaLabel}
-                                data-tooltip={tooltip}
-                                onClick={handleClick}
-                              >
-                                <Icon name={iconName} />
-                              </button>
-                            );
-                          })}
+                              const handleClick = () => {
+                                if (action.key === 'copy') {
+                                  return void handleCopy(item.id, item.content);
+                                }
+                              };
+
+                              return (
+                                <button
+                                  key={action.key}
+                                  type="button"
+                                  className={`thread-action-pill ${isActive ? 'is-active' : ''}`}
+                                  aria-label={ariaLabel}
+                                  data-tooltip={tooltip}
+                                  onClick={handleClick}
+                                >
+                                  <Icon name={iconName} />
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </article>
-              ))}
+                    )}
+                  </article>
+                );
+              })}
 
               {isStreaming && (
                 <article className="thread-entry is-assistant">

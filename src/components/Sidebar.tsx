@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Conversation } from '../types';
+import type { Conversation, User } from '../types';
 import Icon from './Icons';
 
 interface SidebarProps {
@@ -9,15 +9,46 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onClearAll: () => void;
   onOpenSettings: () => void;
+  onLogout: () => void;
+  currentUser: User;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
+  isClearingAll: boolean;
 }
 
 function formatConversationTitle(title: string): string {
   return title.length > 28 ? `${title.slice(0, 28)}...` : title;
+}
+
+function getUserLabel(email: string): string {
+  const localPart = email.split('@')[0]?.trim();
+  if (!localPart) {
+    return 'My Account';
+  }
+
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((segment) => segment[0].toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function getUserInitials(email: string): string {
+  const localPart = email.split('@')[0]?.trim();
+  if (!localPart) {
+    return 'ME';
+  }
+
+  const segments = localPart.split(/[._-]+/).filter(Boolean);
+  if (segments.length >= 2) {
+    return `${segments[0][0]}${segments[1][0]}`.toUpperCase();
+  }
+
+  return localPart.slice(0, 2).toUpperCase();
 }
 
 function ConversationMenu({
@@ -89,11 +120,11 @@ function ConversationMenu({
                 left: `${menuPosition.left}px`,
               }}
             >
-              <button type="button" className="shell-conversation-menu-item">
+              <button type="button" className="shell-conversation-menu-item" disabled>
                 <Icon name="pin" />
                 <span>置顶</span>
               </button>
-              <button type="button" className="shell-conversation-menu-item">
+              <button type="button" className="shell-conversation-menu-item" disabled>
                 <Icon name="pen" />
                 <span>重命名</span>
               </button>
@@ -113,25 +144,84 @@ function ConversationMenu({
   );
 }
 
+function ConversationList({
+  conversations,
+  activeId,
+  openConversationMenuId,
+  onSelect,
+  onToggleMenu,
+  onDelete,
+}: {
+  conversations: Conversation[];
+  activeId: string | null;
+  openConversationMenuId: string | null;
+  onSelect: (id: string) => void;
+  onToggleMenu: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (conversations.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="shell-conversation-list">
+      {conversations.map((conversation) => {
+        const isActive = conversation.id === activeId;
+
+        return (
+          <div
+            key={conversation.id}
+            className={`shell-conversation-item ${isActive ? 'is-active' : ''}`}
+            onClick={() => onSelect(conversation.id)}
+          >
+            <button
+              type="button"
+              className="shell-conversation-select"
+              onClick={() => onSelect(conversation.id)}
+            >
+              <span className="shell-conversation-title">
+                {formatConversationTitle(conversation.title)}
+              </span>
+            </button>
+
+            <span className="shell-conversation-actions">
+              <ConversationMenu
+                conversationId={conversation.id}
+                isOpen={openConversationMenuId === conversation.id}
+                onToggle={() => onToggleMenu(conversation.id)}
+                onDelete={onDelete}
+              />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Sidebar({
   conversations,
   activeId,
   onSelect,
   onNew,
   onDelete,
+  onClearAll,
   onOpenSettings,
+  onLogout,
+  currentUser,
   isMobileOpen,
   onCloseMobile,
   isCollapsed,
   onToggleCollapsed,
+  isClearingAll,
 }: SidebarProps) {
-  const primaryConversations = conversations.slice(0, 6);
-  const recentConversations = conversations.slice(6, 9);
-  const compactConversationId =
-    activeId ?? primaryConversations[0]?.id ?? recentConversations[0]?.id ?? null;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isClearConfirming, setIsClearConfirming] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -153,9 +243,88 @@ export default function Sidebar({
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
 
+  useEffect(() => {
+    if (!isSearchOpen) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (conversations.length > 0) {
+      return;
+    }
+
+    setIsClearConfirming(false);
+  }, [conversations.length]);
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredConversations = useMemo(() => {
+    if (!normalizedQuery) {
+      return conversations;
+    }
+
+    return conversations.filter((conversation) =>
+      conversation.title.toLowerCase().includes(normalizedQuery)
+    );
+  }, [conversations, normalizedQuery]);
+
+  const primaryConversations = filteredConversations.slice(0, 6);
+  const recentConversations = filteredConversations.slice(6, 9);
+  const compactConversationId =
+    activeId ?? filteredConversations[0]?.id ?? conversations[0]?.id ?? null;
+  const hasConversations = conversations.length > 0;
+  const hasSearchQuery = normalizedQuery.length > 0;
+  const showSearchResults = isSearchOpen && hasSearchQuery;
+  const searchResultCount = filteredConversations.length;
+  const currentUserLabel = getUserLabel(currentUser.email);
+  const currentUserInitials = getUserInitials(currentUser.email);
+
   const handleConversationDelete = (id: string) => {
     setOpenConversationMenuId(null);
     onDelete(id);
+  };
+
+  const handleToggleSearch = () => {
+    if (isCollapsed) {
+      onToggleCollapsed();
+      setIsSearchOpen(true);
+      return;
+    }
+
+    setIsSearchOpen((current) => {
+      const next = !current;
+      if (!next) {
+        setSearchQuery('');
+      }
+      return next;
+    });
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      setSearchQuery('');
+      setIsSearchOpen(false);
+    }
+  };
+
+  const handleClearAll = () => {
+    if (isClearingAll) {
+      return;
+    }
+
+    if (!isClearConfirming) {
+      setIsClearConfirming(true);
+      return;
+    }
+
+    onClearAll();
   };
 
   return (
@@ -189,108 +358,145 @@ export default function Sidebar({
               </div>
             </div>
 
-            <div className="shell-create-row">
+            <div className={`shell-create-row ${isSearchOpen ? 'is-search-open' : ''}`}>
               <button className="shell-new-chat" type="button" onClick={onNew}>
                 <span className="shell-new-chat-plus">+</span>
                 <span>New chat</span>
               </button>
               <button
-                className="shell-search-button"
+                className={`shell-search-button ${isSearchOpen ? 'is-active' : ''}`}
                 type="button"
-                aria-label="Search conversations"
+                aria-label={isSearchOpen ? 'Close search' : 'Search conversations'}
+                data-tooltip={isSearchOpen ? 'Close search' : 'Search conversations'}
+                onClick={handleToggleSearch}
               >
-                <Icon name="search" />
+                <Icon name={isSearchOpen ? 'close' : 'search'} />
               </button>
+            </div>
+
+            <div className={`shell-search-panel ${isSearchOpen ? 'is-open' : ''}`}>
+              <div className="shell-search-input-wrap">
+                <span className="shell-search-input-icon">
+                  <Icon name="search" />
+                </span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  placeholder="Search conversations..."
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    className="shell-search-clear"
+                    aria-label="Clear search"
+                    onClick={() => setSearchQuery('')}
+                  >
+                    <Icon name="close" />
+                  </button>
+                ) : null}
+              </div>
+              <div className="shell-search-meta">
+                <span>
+                  {hasSearchQuery
+                    ? `${searchResultCount} result${searchResultCount === 1 ? '' : 's'}`
+                    : 'Type to filter your conversations in real time'}
+                </span>
+              </div>
             </div>
 
             <div className="shell-section-head">
-              <span>Your conversations</span>
-              <button type="button" className="shell-clear-button">
-                Clear All
-              </button>
-            </div>
-
-            <div className="shell-conversation-list">
-              {primaryConversations.map((conversation) => {
-                const isActive = conversation.id === activeId;
-
-                return (
-                  <div
-                    key={conversation.id}
-                    className={`shell-conversation-item ${isActive ? 'is-active' : ''}`}
-                    onClick={() => onSelect(conversation.id)}
-                  >
-                    <button
-                      type="button"
-                      className="shell-conversation-select"
-                      onClick={() => onSelect(conversation.id)}
-                    >
-                      <span className="shell-conversation-title">
-                        {formatConversationTitle(conversation.title)}
-                      </span>
-                    </button>
-
-                    <span className="shell-conversation-actions">
-                      <ConversationMenu
-                        conversationId={conversation.id}
-                        isOpen={openConversationMenuId === conversation.id}
-                        onToggle={() =>
-                          setOpenConversationMenuId((prev) =>
-                            prev === conversation.id ? null : conversation.id
-                          )
-                        }
-                        onDelete={handleConversationDelete}
-                      />
-                    </span>
-                  </div>
-                );
-              })}
-
-              {primaryConversations.length === 0 && (
-                <div className="shell-empty-history">Your recent chats will appear here.</div>
-              )}
-            </div>
-
-            <div className="shell-divider" />
-
-            <div className="shell-section-label">Last 7 Days</div>
-            <div className="shell-conversation-list shell-conversation-list--recent">
-              {recentConversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className="shell-conversation-item"
-                  onClick={() => onSelect(conversation.id)}
-                >
+              <span>{showSearchResults ? 'Search results' : 'Your conversations'}</span>
+              {isClearConfirming ? (
+                <div className="shell-clear-confirm">
                   <button
                     type="button"
-                    className="shell-conversation-select"
-                    onClick={() => onSelect(conversation.id)}
+                    className="shell-clear-cancel"
+                    onClick={() => setIsClearConfirming(false)}
+                    disabled={isClearingAll}
                   >
-                    <span className="shell-conversation-title">
-                      {formatConversationTitle(conversation.title)}
-                    </span>
+                    Cancel
                   </button>
-                  <span className="shell-conversation-actions">
-                    <ConversationMenu
-                      conversationId={conversation.id}
-                      isOpen={openConversationMenuId === conversation.id}
-                      onToggle={() =>
-                        setOpenConversationMenuId((prev) =>
-                          prev === conversation.id ? null : conversation.id
-                        )
-                      }
-                      onDelete={handleConversationDelete}
-                    />
-                  </span>
+                  <button
+                    type="button"
+                    className="shell-clear-confirm-button"
+                    onClick={handleClearAll}
+                    disabled={!hasConversations || isClearingAll}
+                  >
+                    {isClearingAll ? 'Clearing...' : 'Confirm'}
+                  </button>
                 </div>
-              ))}
-
-              {recentConversations.length === 0 && (
-                <div className="shell-muted-item">
-                  <span>Min States For Binary DFA</span>
-                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="shell-clear-button"
+                  onClick={handleClearAll}
+                  disabled={!hasConversations || isClearingAll}
+                >
+                  {isClearingAll ? 'Clearing...' : 'Clear All'}
+                </button>
               )}
             </div>
+
+            {showSearchResults ? (
+              <>
+                <ConversationList
+                  conversations={filteredConversations}
+                  activeId={activeId}
+                  openConversationMenuId={openConversationMenuId}
+                  onSelect={onSelect}
+                  onToggleMenu={(id) =>
+                    setOpenConversationMenuId((prev) => (prev === id ? null : id))
+                  }
+                  onDelete={handleConversationDelete}
+                />
+                {filteredConversations.length === 0 ? (
+                  <div className="shell-search-empty">
+                    <strong>No conversations found</strong>
+                    <span>Try a different keyword or clear the search.</span>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <ConversationList
+                  conversations={primaryConversations}
+                  activeId={activeId}
+                  openConversationMenuId={openConversationMenuId}
+                  onSelect={onSelect}
+                  onToggleMenu={(id) =>
+                    setOpenConversationMenuId((prev) => (prev === id ? null : id))
+                  }
+                  onDelete={handleConversationDelete}
+                />
+
+                {primaryConversations.length === 0 ? (
+                  <div className="shell-empty-history">Your recent chats will appear here.</div>
+                ) : null}
+
+                <div className="shell-divider" />
+
+                <div className="shell-section-label">Last 7 Days</div>
+                <ConversationList
+                  conversations={recentConversations}
+                  activeId={activeId}
+                  openConversationMenuId={openConversationMenuId}
+                  onSelect={onSelect}
+                  onToggleMenu={(id) =>
+                    setOpenConversationMenuId((prev) => (prev === id ? null : id))
+                  }
+                  onDelete={handleConversationDelete}
+                />
+
+                {recentConversations.length === 0 ? (
+                  <div className="shell-muted-item">
+                    <span>More chats will show up here.</span>
+                  </div>
+                ) : null}
+              </>
+            )}
 
             <div className="shell-sidebar-spacer" />
 
@@ -302,25 +508,24 @@ export default function Sidebar({
                 aria-expanded={isProfileMenuOpen}
                 aria-label="Open profile menu"
               >
-                <img
-                  className="shell-avatar-chip"
-                  src="https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png"
-                  alt="Andrew Neilson"
-                />
-                <span>Andrew Neilson</span>
+                <span className="shell-avatar-chip shell-avatar-initials" aria-hidden="true">
+                  {currentUserInitials}
+                </span>
+                <span>{currentUserLabel}</span>
               </button>
 
               {isProfileMenuOpen && (
                 <div className="shell-profile-menu">
                   <button type="button" className="shell-profile-card">
-                    <img
-                      className="shell-profile-card-avatar"
-                      src="https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png"
-                      alt="Andrew Neilson"
-                    />
+                    <span
+                      className="shell-profile-card-avatar shell-avatar-initials"
+                      aria-hidden="true"
+                    >
+                      {currentUserInitials}
+                    </span>
                     <span className="shell-profile-card-copy">
-                      <strong>Andrew Neilson</strong>
-                      <span>Plus</span>
+                      <strong>{currentUserLabel}</strong>
+                      <span>{currentUser.email}</span>
                     </span>
                     <span className="shell-profile-card-arrow">
                       <Icon name="arrow-right" />
@@ -358,7 +563,14 @@ export default function Sidebar({
                       <Icon name="help" />
                       <span className="shell-profile-menu-label">Help</span>
                     </button>
-                    <button type="button" className="shell-profile-menu-item">
+                    <button
+                      type="button"
+                      className="shell-profile-menu-item"
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        onLogout();
+                      }}
+                    >
                       <Icon name="logout" />
                       <span className="shell-profile-menu-label">Log out</span>
                     </button>
@@ -390,8 +602,9 @@ export default function Sidebar({
 
           <button
             type="button"
-            className="shell-compact-icon"
+            className={`shell-compact-icon ${isSearchOpen ? 'is-active' : ''}`}
             aria-label="Search conversations"
+            onClick={handleToggleSearch}
           >
             <Icon name="search" />
           </button>
@@ -420,11 +633,9 @@ export default function Sidebar({
             aria-label="Open settings"
             onClick={onOpenSettings}
           >
-            <img
-              className="shell-compact-avatar-dot"
-              src="https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png"
-              alt="Andrew Neilson"
-            />
+            <span className="shell-compact-avatar-dot shell-avatar-initials" aria-hidden="true">
+              {currentUserInitials}
+            </span>
           </button>
         </div>
       </div>

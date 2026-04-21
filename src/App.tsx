@@ -5,18 +5,22 @@ import Icon from './components/Icons';
 import SettingsDrawer from './components/SettingsDrawer';
 import Sidebar from './components/Sidebar';
 import SignUpScreen from './components/SignUpScreen';
+import { message as toast } from './services/message';
 import * as api from './services/api';
 import type {
+  ComposerAttachment,
   Conversation,
   Message,
   ModelOption,
   ReasoningLevel,
+  User,
 } from './types';
 
 const MODEL_STORAGE_KEY = 'memory-chat:selected-model';
 const REASONING_STORAGE_KEY = 'memory-chat:reasoning-level';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'memory-chat:sidebar-collapsed';
 const VIEW_STORAGE_KEY = 'memory-chat:active-view';
+const AUTH_TOKEN_STORAGE_KEY = 'memory-chat:auth-token';
 
 type AppView = 'signup' | 'chat';
 type ChatTheme = 'rose' | 'butter' | 'mist' | 'mint' | 'neutral';
@@ -56,11 +60,38 @@ function getConversationTheme(_conversationId: string | null): ChatTheme {
   return 'neutral';
 }
 
+function toTempMessageAttachments(attachments: ComposerAttachment[]) {
+  return attachments.map((attachment) => ({
+    id: attachment.id,
+    name: attachment.name,
+    mime_type: attachment.mime_type,
+    kind: attachment.kind,
+    size_bytes: attachment.size_bytes,
+    content_url: attachment.preview_url ?? URL.createObjectURL(attachment.file),
+  }));
+}
+
+function revokeAttachmentUrls(attachments: Message['attachments'] | undefined) {
+  const urls = new Set(
+    (attachments ?? [])
+      .map((attachment) => attachment.content_url)
+      .filter((url) => url.startsWith('blob:'))
+  );
+
+  urls.forEach((url) => {
+    URL.revokeObjectURL(url);
+  });
+}
+
 export default function App() {
   const [appView, setAppView] = useState<AppView>(() => {
     const storedView = window.localStorage.getItem(VIEW_STORAGE_KEY);
     return storedView === 'chat' ? 'chat' : 'signup';
   });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthBootstrapping, setIsAuthBootstrapping] = useState(true);
+  const [authErrorMessage, setAuthErrorMessage] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -73,13 +104,60 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isClearingConversations, setIsClearingConversations] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
   });
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
 
+  const resetChatState = useCallback(() => {
+    setConversations([]);
+    setActiveConvId(null);
+    setMessages([]);
+    setStreamingContent('');
+    setIsStreaming(false);
+    setStreamingStartedAt(null);
+    setErrorMessage('');
+    setIsSettingsOpen(false);
+    setIsMobileSidebarOpen(false);
+  }, []);
+
   useEffect(() => {
+    const bootstrapAuth = async () => {
+      const storedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+      if (!storedToken) {
+        api.setAuthToken(null);
+        setAppView('signup');
+        setIsAuthBootstrapping(false);
+        return;
+      }
+
+      api.setAuthToken(storedToken);
+
+      try {
+        const user = await api.fetchCurrentUser();
+        setCurrentUser(user);
+        setAppView('chat');
+      } catch (err) {
+        console.error(err);
+        api.setAuthToken(null);
+        window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+        setCurrentUser(null);
+        setAppView('signup');
+      } finally {
+        setIsAuthBootstrapping(false);
+      }
+    };
+
+    void bootstrapAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
     api
       .fetchConversations()
       .then((data) => {
@@ -90,9 +168,13 @@ export default function App() {
         console.error(err);
         setErrorMessage(err.message);
       });
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
     api
       .fetchModels()
       .then((catalog) => {
@@ -114,7 +196,7 @@ export default function App() {
         console.error(err);
         setErrorMessage(err.message);
       });
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     window.localStorage.setItem(VIEW_STORAGE_KEY, appView);
@@ -145,7 +227,7 @@ export default function App() {
   }, [selectedModel, modelOptions]);
 
   useEffect(() => {
-    if (!activeConvId) {
+    if (!currentUser || !activeConvId) {
       setMessages([]);
       return;
     }
@@ -160,7 +242,7 @@ export default function App() {
         console.error(err);
         setErrorMessage(err.message);
       });
-  }, [activeConvId]);
+  }, [activeConvId, currentUser]);
 
   const refreshConversations = useCallback(async () => {
     const convs = await api.fetchConversations();
@@ -168,11 +250,57 @@ export default function App() {
     setErrorMessage('');
   }, []);
 
-  const handleEnterChat = useCallback(() => {
-    setAppView('chat');
-    setErrorMessage('');
-    setIsMobileSidebarOpen(false);
-  }, []);
+  const handleAuthSubmit = useCallback(
+    async (mode: 'signup' | 'login', email: string, password: string) => {
+      setIsAuthenticating(true);
+      setAuthErrorMessage('');
+
+      try {
+        const response =
+          mode === 'signup'
+            ? await api.register(email, password)
+            : await api.login(email, password);
+
+        api.setAuthToken(response.token);
+        window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, response.token);
+        setCurrentUser(response.user);
+        setAppView('chat');
+        setErrorMessage('');
+        setAuthErrorMessage('');
+        toast.success({
+          content: mode === 'signup' ? 'Account created successfully' : 'Welcome back',
+          placement: 'top',
+        });
+      } catch (err) {
+        console.error(err);
+        setAuthErrorMessage(err instanceof Error ? err.message : 'Authentication failed');
+        throw err;
+      } finally {
+        setIsAuthenticating(false);
+      }
+    },
+    []
+  );
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      streamAbortControllerRef.current?.abort();
+      api.setAuthToken(null);
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      setCurrentUser(null);
+      setAuthErrorMessage('');
+      resetChatState();
+      setAppView('signup');
+      toast.success({
+        content: 'Signed out',
+        placement: 'top',
+      });
+    }
+  }, [resetChatState]);
 
   const handleNewChat = useCallback(() => {
     setAppView('chat');
@@ -209,17 +337,55 @@ export default function App() {
     [activeConvId, refreshConversations]
   );
 
+  const handleClearAllConversations = useCallback(async () => {
+    if (isClearingConversations) return;
+
+    setIsClearingConversations(true);
+    try {
+      await api.clearAllConversations();
+      setConversations([]);
+      setActiveConvId(null);
+      setMessages([]);
+      setStreamingContent('');
+      setErrorMessage('');
+      setIsMobileSidebarOpen(false);
+      toast.success({
+        content: 'All conversations cleared',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError =
+        err instanceof Error ? err.message : 'Failed to clear conversations';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      setIsClearingConversations(false);
+    }
+  }, [isClearingConversations]);
+
   const handleSend = useCallback(
-    async (message: string) => {
+    async ({
+      message,
+      attachments,
+    }: {
+      message: string;
+      attachments: ComposerAttachment[];
+    }) => {
       if (isStreaming) return;
 
       setAppView('chat');
+      const tempAttachments = toTempMessageAttachments(attachments);
 
       const tempUserMsg: Message = {
         id: `temp-${Date.now()}`,
         role: 'user',
         content: message,
         created_at: new Date().toISOString(),
+        attachments: tempAttachments,
       };
 
       setMessages((prev) => [...prev, tempUserMsg]);
@@ -237,6 +403,7 @@ export default function App() {
       try {
         await api.sendMessage(
           message,
+          attachments.map((attachment) => attachment.file),
           currentConvId,
           selectedModel || null,
           reasoningLevel,
@@ -266,6 +433,7 @@ export default function App() {
         setIsStreaming(false);
         setStreamingStartedAt(null);
         setStreamingContent('');
+        revokeAttachmentUrls(tempUserMsg.attachments);
 
         if (currentConvId) {
           try {
@@ -305,12 +473,26 @@ export default function App() {
     [modelOptions, selectedModel]
   );
 
-  if (appView === 'signup') {
-    return <SignUpScreen onEnter={handleEnterChat} />;
+  if (isAuthBootstrapping) {
+    return <div className="auth-loading-screen">Loading...</div>;
+  }
+
+  if (!currentUser || appView === 'signup') {
+    return (
+      <SignUpScreen
+        onSubmit={handleAuthSubmit}
+        isSubmitting={isAuthenticating}
+        errorMessage={authErrorMessage}
+      />
+    );
   }
 
   return (
-    <div className={`app-shell theme-${currentTheme} ${isSidebarCollapsed ? 'is-sidebar-collapsed' : ''}`}>
+    <div
+      className={`app-shell theme-${currentTheme} ${
+        isSidebarCollapsed ? 'is-sidebar-collapsed' : ''
+      }`}
+    >
       <button
         type="button"
         className={`mobile-sidebar-backdrop ${isMobileSidebarOpen ? 'is-open' : ''}`}
@@ -323,14 +505,18 @@ export default function App() {
         onSelect={handleSelectConversation}
         onNew={handleNewChat}
         onDelete={handleDeleteConversation}
+        onClearAll={handleClearAllConversations}
         onOpenSettings={() => {
           setIsMobileSidebarOpen(false);
           setIsSettingsOpen(true);
         }}
+        onLogout={handleLogout}
+        currentUser={currentUser}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
+        isClearingAll={isClearingConversations}
       />
       <div className="mobile-topbar">
         <button
