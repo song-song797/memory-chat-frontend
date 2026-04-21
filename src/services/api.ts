@@ -79,11 +79,13 @@ export async function sendMessage(
   reasoningLevel: ReasoningLevel,
   onChunk: (content: string) => void,
   onConversationId: (id: string) => void,
-  onError: (error: string) => void
+  onError: (error: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       message,
       conversation_id: conversationId,

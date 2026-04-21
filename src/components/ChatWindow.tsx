@@ -17,7 +17,19 @@ interface ChatWindowProps {
   errorMessage: string;
   currentModelLabel: string;
   onSend: (message: string) => void;
+  onStopStreaming: () => void;
   onOpenModelPicker: () => void;
+}
+
+type ThreadActionKey = 'copy' | 'refresh' | 'read' | 'like' | 'dislike' | 'share' | 'more';
+
+interface ThreadActionConfig {
+  key: ThreadActionKey;
+  icon: string;
+  tooltip: string;
+  ariaLabel: string;
+  activeIcon?: string;
+  activeAriaLabel?: string;
 }
 
 const featureStacks = [
@@ -67,6 +79,52 @@ const featureCards = [
 
 const WELCOME_TITLE = 'Good day! How may I assist you today?';
 const AUTO_SCROLL_THRESHOLD = 80;
+const THREAD_ACTIONS: ThreadActionConfig[] = [
+  {
+    key: 'copy',
+    icon: 'copy',
+    activeIcon: 'check-circle',
+    tooltip: 'Copy',
+    ariaLabel: 'Copy answer',
+    activeAriaLabel: 'Copied',
+  },
+  {
+    key: 'refresh',
+    icon: 'refresh',
+    tooltip: 'Regenerate',
+    ariaLabel: 'Refresh answer',
+  },
+  {
+    key: 'read',
+    icon: 'volume-loud',
+    tooltip: 'Read aloud',
+    ariaLabel: 'Read answer aloud',
+  },
+  {
+    key: 'like',
+    icon: 'thumb',
+    tooltip: 'Like',
+    ariaLabel: 'Like answer',
+  },
+  {
+    key: 'dislike',
+    icon: 'thumb-down',
+    tooltip: 'Dislike',
+    ariaLabel: 'Dislike answer',
+  },
+  {
+    key: 'share',
+    icon: 'share',
+    tooltip: 'Share',
+    ariaLabel: 'Share answer',
+  },
+  {
+    key: 'more',
+    icon: 'more-1',
+    tooltip: 'More',
+    ariaLabel: 'More actions',
+  },
+];
 
 function normalizeMarkdownContent(content: string) {
   let normalized = content;
@@ -101,6 +159,7 @@ export default function ChatWindow({
   errorMessage,
   currentModelLabel,
   onSend,
+  onStopStreaming,
   onOpenModelPicker,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -109,30 +168,74 @@ export default function ChatWindow({
   const pendingConversationScrollRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const actionFeedbackTimerRef = useRef<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [typedWelcomeTitle, setTypedWelcomeTitle] = useState('');
+  const [activeActionFeedback, setActiveActionFeedback] = useState<{
+    messageId: string;
+    action: ThreadActionKey;
+  } | null>(null);
 
-  const handleCopy = async (content: string) => {
+  const showActionFeedback = (messageId: string, action: ThreadActionKey) => {
+    setActiveActionFeedback({ messageId, action });
+
+    if (actionFeedbackTimerRef.current) {
+      window.clearTimeout(actionFeedbackTimerRef.current);
+    }
+
+    actionFeedbackTimerRef.current = window.setTimeout(() => {
+      setActiveActionFeedback((current) =>
+        current?.messageId === messageId && current.action === action ? null : current
+      );
+      actionFeedbackTimerRef.current = null;
+    }, 1400);
+  };
+
+  const handleCopy = async (messageId: string, content: string) => {
     try {
       await navigator.clipboard.writeText(content);
+      showActionFeedback(messageId, 'copy');
+      return;
     } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = content;
-      textarea.setAttribute('readonly', 'true');
-      textarea.style.position = 'absolute';
-      textarea.style.left = '-9999px';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = content;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        if (!copied) {
+          throw new Error('execCommand copy returned false');
+        }
+
+        showActionFeedback(messageId, 'copy');
+      } catch {
+        message.error({
+          content: 'Failed to copy answer',
+          placement: 'top',
+        });
+      }
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (actionFeedbackTimerRef.current) {
+        window.clearTimeout(actionFeedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (previousConversationIdRef.current === conversationId) return;
 
     previousConversationIdRef.current = conversationId;
     pendingConversationScrollRef.current = true;
+    setActiveActionFeedback(null);
   }, [conversationId]);
 
   useLayoutEffect(() => {
@@ -295,7 +398,7 @@ export default function ChatWindow({
             </div>
           </div>
           <div className="chat-composer-dock">
-            <ChatInput onSend={onSend} disabled={false} />
+            <ChatInput onSend={onSend} submitDisabled={false} />
           </div>
         </section>
       ) : (
@@ -326,44 +429,37 @@ export default function ChatWindow({
                       </div>
                       <div className="thread-answer-footer">
                         <div className="thread-actions">
-                          <button
-                            type="button"
-                            className="thread-action-pill"
-                            aria-label="Copy answer"
-                            onClick={() => void handleCopy(message.content)}
-                          >
-                            <Icon name="copy" />
-                          </button>
-                          <button
-                            type="button"
-                            className="thread-action-pill"
-                            aria-label="Refresh answer"
-                          >
-                            <Icon name="refresh" />
-                          </button>
-                          <button
-                            type="button"
-                            className="thread-action-pill"
-                            aria-label="Read answer aloud"
-                          >
-                            <Icon name="volume-loud" />
-                          </button>
-                          <button type="button" className="thread-action-pill" aria-label="Like answer">
-                            <Icon name="thumb" />
-                          </button>
-                          <button
-                            type="button"
-                            className="thread-action-pill"
-                            aria-label="Dislike answer"
-                          >
-                            <Icon name="thumb-down" />
-                          </button>
-                          <button type="button" className="thread-action-pill" aria-label="Share answer">
-                            <Icon name="share" />
-                          </button>
-                          <button type="button" className="thread-action-pill" aria-label="More actions">
-                            <Icon name="more-1" />
-                          </button>
+                          {THREAD_ACTIONS.map((action) => {
+                            const isActive =
+                              activeActionFeedback?.messageId === message.id &&
+                              activeActionFeedback.action === action.key;
+                            const tooltip = isActive ? '' : action.tooltip;
+                            const iconName =
+                              isActive && action.activeIcon ? action.activeIcon : action.icon;
+                            const ariaLabel =
+                              isActive && action.activeAriaLabel
+                                ? action.activeAriaLabel
+                                : action.ariaLabel;
+
+                            const handleClick = () => {
+                              if (action.key === 'copy') {
+                                return void handleCopy(message.id, message.content);
+                              }
+                            };
+
+                            return (
+                              <button
+                                key={action.key}
+                                type="button"
+                                className={`thread-action-pill ${isActive ? 'is-active' : ''}`}
+                                aria-label={ariaLabel}
+                                data-tooltip={tooltip}
+                                onClick={handleClick}
+                              >
+                                <Icon name={iconName} />
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -399,7 +495,12 @@ export default function ChatWindow({
             </div>
           </div>
           <div className="chat-composer-dock">
-            <ChatInput onSend={onSend} disabled={isStreaming} />
+            <ChatInput
+              onSend={onSend}
+              onStop={onStopStreaming}
+              submitDisabled={isStreaming}
+              isStreaming={isStreaming}
+            />
           </div>
         </div>
       )}

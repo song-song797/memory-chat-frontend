@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import ChatWindow from './components/ChatWindow';
 import Icon from './components/Icons';
@@ -76,6 +76,8 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
   });
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const stopRequestedRef = useRef(false);
 
   useEffect(() => {
     api
@@ -225,6 +227,9 @@ export default function App() {
       setStreamingStartedAt(Date.now());
       setStreamingContent('');
       setErrorMessage('');
+      stopRequestedRef.current = false;
+      const abortController = new AbortController();
+      streamAbortControllerRef.current = abortController;
 
       let currentConvId = activeConvId;
       let sendFailed = false;
@@ -246,13 +251,18 @@ export default function App() {
             sendFailed = true;
             setErrorMessage(error);
             console.error('Stream error:', error);
-          }
+          },
+          abortController.signal
         );
       } catch (err) {
-        sendFailed = true;
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to send message');
-        console.error(err);
+        if (!(err instanceof Error && err.name === 'AbortError' && stopRequestedRef.current)) {
+          sendFailed = true;
+          setErrorMessage(err instanceof Error ? err.message : 'Failed to send message');
+          console.error(err);
+        }
       } finally {
+        streamAbortControllerRef.current = null;
+        stopRequestedRef.current = false;
         setIsStreaming(false);
         setStreamingStartedAt(null);
         setStreamingContent('');
@@ -277,6 +287,12 @@ export default function App() {
     },
     [activeConvId, isStreaming, reasoningLevel, refreshConversations, selectedModel]
   );
+
+  const handleStopStreaming = useCallback(() => {
+    if (!streamAbortControllerRef.current) return;
+    stopRequestedRef.current = true;
+    streamAbortControllerRef.current.abort();
+  }, []);
 
   const currentTheme = useMemo(
     () => getConversationTheme(activeConvId),
@@ -350,6 +366,7 @@ export default function App() {
         errorMessage={errorMessage}
         currentModelLabel={selectedModelOption?.label ?? selectedModel}
         onSend={handleSend}
+        onStopStreaming={handleStopStreaming}
         onOpenModelPicker={() => setIsSettingsOpen(true)}
       />
       <SettingsDrawer

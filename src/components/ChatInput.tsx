@@ -3,10 +3,17 @@ import Icon from './Icons';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
-  disabled: boolean;
+  onStop?: () => void;
+  submitDisabled: boolean;
+  isStreaming?: boolean;
 }
 
-export default function ChatInput({ onSend, disabled }: ChatInputProps) {
+export default function ChatInput({
+  onSend,
+  onStop,
+  submitDisabled,
+  isStreaming = false,
+}: ChatInputProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const maxTextareaHeight = 220;
@@ -23,18 +30,16 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   }, [maxTextareaHeight, text]);
 
   useEffect(() => {
-    if (disabled) return;
-
     const timer = window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
     });
 
     return () => window.cancelAnimationFrame(timer);
-  }, [disabled]);
+  }, []);
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || submitDisabled) return;
     onSend(trimmed);
     setText('');
   };
@@ -57,7 +62,6 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
             onKeyDown={handleKeyDown}
             placeholder="What's in your mind?..."
             rows={1}
-            disabled={disabled}
           />
         </div>
         <div className="composer-toolbar">
@@ -67,12 +71,12 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
           <span className="composer-toolbar-spacer" />
           <button
             type="button"
-            className="composer-send-button"
-            onClick={handleSend}
-            disabled={disabled || !text.trim()}
-            aria-label="Send message"
+            className={`composer-send-button ${isStreaming ? 'is-stop' : ''}`}
+            onClick={isStreaming ? onStop : handleSend}
+            disabled={isStreaming ? !onStop : submitDisabled || !text.trim()}
+            aria-label={isStreaming ? 'Stop generating' : 'Send message'}
           >
-            <Icon name="send" />
+            <Icon name={isStreaming ? 'close' : 'send'} />
           </button>
         </div>
       </div>

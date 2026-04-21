@@ -1080,9 +1080,63 @@
 }
 
 .thread-action-pill {
+  position: relative;
   width: 28px;
   height: 28px;
   padding: 0;
+  border-radius: 999px;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.thread-action-pill:hover,
+.thread-action-pill:focus-visible {
+  color: #5b64f6;
+  background: rgba(93, 102, 255, 0.08);
+}
+
+.thread-action-pill.is-active {
+  color: #5b64f6;
+  background: rgba(93, 102, 255, 0.1);
+}
+
+.thread-action-pill::after {
+  content: none;
+}
+
+.thread-action-pill[data-tooltip]:not([data-tooltip=''])::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(28, 29, 33, 0.92);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+}
+
+.thread-action-pill[data-tooltip]:not([data-tooltip='']):hover::after,
+.thread-action-pill[data-tooltip]:not([data-tooltip='']):focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.thread-action-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(93, 102, 255, 0.14);
 }
 
 .thread-regenerate-button {
@@ -1424,6 +1478,11 @@
   color: #ffffff;
   background: linear-gradient(135deg, #7b8dff, #5665ff);
   box-shadow: 0 14px 24px rgba(86, 101, 255, 0.34);
+}
+
+.composer-send-button.is-stop {
+  background: linear-gradient(135deg, #2a2c35, #111217);
+  box-shadow: 0 14px 24px rgba(17, 18, 23, 0.24);
 }
 
 .composer-send-button:disabled {
