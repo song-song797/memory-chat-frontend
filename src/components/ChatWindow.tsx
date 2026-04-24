@@ -41,7 +41,7 @@ const featureStacks = [
   {
     title: 'Capabilities',
     body: 'How much capable chat.ai to full-fill your needs',
-    icon: 'lightning' as const,
+    icon: 'flash' as const,
   },
   {
     title: 'Limitation',

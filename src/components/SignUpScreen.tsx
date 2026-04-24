@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { sendLandingAgentMessage } from '../services/api';
+import { message } from '../services/message';
 import type { LandingAgentMessage } from '../types';
 import Icon from './Icons';
 
@@ -20,7 +21,7 @@ export default function SignUpScreen({
     '上传图片和文件之后可以做什么？',
     '登录之后我的聊天记录会怎么保存？',
   ] as const;
-  const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [mode, setMode] = useState<'signup' | 'login'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -158,12 +159,15 @@ export default function SignUpScreen({
     }
   };
 
+  const handleSocialLogin = () => {
+    message.info('功能暂未实现');
+  };
+
   return (
     <div className="sign-screen">
       <section className="sign-hero">
         <div className="sign-brand">CHAT A.I+</div>
         <div className="sign-copy">
-          <span className="sign-tag">Website guide agent</span>
           <h1>先和网站导览 Agent 聊聊，再决定怎么开始。</h1>
           <p>你可以直接问它功能、上传能力、记忆方式，或者登录后会发生什么。</p>
 
@@ -191,23 +195,20 @@ export default function SignUpScreen({
                 </span>
                 <span className="sign-agent-name">Navigator</span>
               </div>
-              <span className={`sign-agent-status ${isAgentLoading ? 'is-busy' : ''}`}>
-                {isAgentLoading ? 'Replying...' : 'Online'}
-              </span>
             </div>
 
             <div className="sign-agent-thread" ref={threadRef}>
-              {agentMessages.map((message, index) => (
+              {agentMessages.map((entry, index) => (
                 <div
-                  key={`${message.role}-${index}`}
-                  className={`sign-agent-row ${message.role === 'user' ? 'is-user' : ''}`}
+                  key={`${entry.role}-${index}`}
+                  className={`sign-agent-row ${entry.role === 'user' ? 'is-user' : ''}`}
                 >
                   <div
-                    className={`sign-agent-bubble ${message.role === 'user' ? 'is-user' : ''} ${
-                      !message.content.trim() ? 'is-empty' : ''
+                    className={`sign-agent-bubble ${entry.role === 'user' ? 'is-user' : ''} ${
+                      !entry.content.trim() ? 'is-empty' : ''
                     }`}
                   >
-                    {message.content.trim() || '正在输入...'}
+                    {entry.content.trim() || '正在输入...'}
                   </div>
                 </div>
               ))}
@@ -255,33 +256,6 @@ export default function SignUpScreen({
 
       <section className="sign-panel">
         <div className="sign-panel-inner">
-          <div className="sign-mode-switch" role="tablist" aria-label="Authentication mode">
-            <button
-              type="button"
-              className={`sign-mode-chip ${mode === 'signup' ? 'is-active' : ''}`}
-              role="tab"
-              aria-selected={mode === 'signup'}
-              onClick={() => {
-                setMode('signup');
-                setLocalError('');
-              }}
-            >
-              Sign up
-            </button>
-            <button
-              type="button"
-              className={`sign-mode-chip ${mode === 'login' ? 'is-active' : ''}`}
-              role="tab"
-              aria-selected={mode === 'login'}
-              onClick={() => {
-                setMode('login');
-                setLocalError('');
-              }}
-            >
-              Login
-            </button>
-          </div>
-
           <h2>{heading}</h2>
           <p>{subheading}</p>
 
@@ -361,11 +335,11 @@ export default function SignUpScreen({
             </button>
           </p>
           <div className="sign-divider">Social login coming soon</div>
-          <button type="button" className="social-button" disabled>
+          <button type="button" className="social-button" onClick={handleSocialLogin}>
             <Icon name="google" />
             <span>Continue with Google</span>
           </button>
-          <button type="button" className="social-button" disabled>
+          <button type="button" className="social-button" onClick={handleSocialLogin}>
             <Icon name="apple" />
             <span>Continue with Apple</span>
           </button>
