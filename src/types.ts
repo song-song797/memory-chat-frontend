@@ -18,6 +18,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
+  pinned: boolean;
   created_at: string;
   updated_at: string;
 }

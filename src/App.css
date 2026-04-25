@@ -529,6 +529,9 @@
   align-items: center;
   text-align: left;
   padding: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: normal;
 }
 
 .shell-conversation-item {
@@ -568,6 +571,37 @@
   white-space: nowrap;
   font-size: 15px;
   font-weight: 500;
+  line-height: normal;
+}
+
+.shell-conversation-rename-input {
+  width: 100%;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: normal;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  box-shadow: none;
+  caret-color: currentColor;
+  display: block;
+  height: auto;
+  letter-spacing: inherit;
+  text-rendering: inherit;
+}
+
+.shell-conversation-rename-input:focus,
+.shell-conversation-rename-input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .shell-conversation-actions {
@@ -576,25 +610,37 @@
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  opacity: 0;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.shell-conversation-pin {
+  position: absolute;
+  inset: 0;
+  color: rgba(72, 72, 76, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
-  transform: translateX(4px);
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.shell-conversation-item:hover .shell-conversation-actions,
-.shell-conversation-item:focus-within .shell-conversation-actions {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
+.shell-conversation-pin svg {
+  width: 14px;
+  height: 14px;
 }
 
 .shell-conversation-menu-wrap {
   position: relative;
   display: inline-flex;
+  width: 22px;
+  height: 22px;
 }
 
 .shell-more-button {
+  position: absolute;
+  inset: 0;
   width: 22px;
   height: 22px;
   padding: 0;
@@ -605,6 +651,24 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.shell-conversation-item:hover .shell-more-button,
+.shell-conversation-item:focus-within .shell-more-button,
+.shell-more-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.shell-conversation-item:hover .shell-conversation-menu-wrap .shell-conversation-pin,
+.shell-conversation-item:focus-within .shell-conversation-menu-wrap .shell-conversation-pin {
+  opacity: 0;
+  transform: translateX(-10px);
 }
 
 .shell-conversation-menu {
@@ -654,6 +718,71 @@
 }
 
 .shell-conversation-menu-item.is-danger {
+  color: #d14d4d;
+}
+
+.shell-confirm-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+.shell-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(18, 18, 24, 0.18);
+}
+
+.shell-confirm-dialog {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(100% - 32px, 360px);
+  padding: 20px;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: var(--surface-shadow);
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.shell-confirm-title {
+  margin: 0;
+  color: #22232b;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.shell-confirm-text {
+  margin: 0;
+  color: #666878;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.shell-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.shell-confirm-button {
+  min-width: 88px;
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(90, 102, 255, 0.08);
+  color: #343649;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.shell-confirm-button.is-danger {
+  background: rgba(209, 77, 77, 0.12);
   color: #d14d4d;
 }
 
@@ -1052,9 +1181,9 @@
   justify-content: flex-end;
 }
 
-.thread-entry.is-user:hover .thread-user-copy-button,
-.thread-entry.is-user:focus-within .thread-user-copy-button,
-.thread-user-copy-button.is-active {
+.thread-entry.is-user:hover .thread-user-actions,
+.thread-entry.is-user:focus-within .thread-user-actions,
+.thread-user-actions.is-visible {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -1111,86 +1240,16 @@
 .thread-user-footer {
   display: flex;
   justify-content: flex-end;
+  min-height: 28px;
 }
 
-.thread-edit-button {
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(51, 51, 57, 0.08);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.82);
-  color: #595961;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.thread-user-copy-button {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid rgba(51, 51, 57, 0.08);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.82);
-  color: #595961;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+.thread-user-actions {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
   transition:
     opacity 0.18s ease,
-    transform 0.18s ease,
-    color 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.thread-user-copy-button:hover,
-.thread-user-copy-button:focus-visible,
-.thread-user-copy-button.is-active {
-  color: #5b64f6;
-  background: rgba(93, 102, 255, 0.08);
-  border-color: rgba(93, 102, 255, 0.16);
-}
-
-.thread-user-copy-button[data-tooltip]:not([data-tooltip=''])::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 8px);
-  padding: 6px 9px;
-  border-radius: 8px;
-  background: rgba(28, 29, 33, 0.92);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transform: translateX(-50%) translateY(-4px);
-  transition:
-    opacity 0.14s ease,
-    transform 0.14s ease;
-}
-
-.thread-user-copy-button[data-tooltip]:not([data-tooltip='']):hover::after,
-.thread-user-copy-button[data-tooltip]:not([data-tooltip='']):focus-visible::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-
-.thread-user-copy-button:focus-visible {
-  outline: none;
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-  box-shadow: 0 0 0 3px rgba(93, 102, 255, 0.14);
+    transform 0.18s ease;
 }
 
 .thread-attachments {
@@ -1200,10 +1259,16 @@
   gap: 10px;
 }
 
+.thread-attachments.has-images {
+  width: fit-content;
+  max-width: min(100%, 560px);
+}
+
 .thread-image-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+  justify-content: end;
 }
 
 .thread-image-card,
@@ -1216,14 +1281,36 @@
 
 .thread-image-card {
   display: block;
+  width: fit-content;
+  max-width: 280px;
   border-radius: 18px;
 }
 
-.thread-image-card img {
+.thread-image-card img,
+.thread-image-placeholder {
   display: block;
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: cover;
+}
+
+.thread-image-card img {
+  width: auto;
+  max-width: 280px;
+  height: auto;
+  max-height: 280px;
+  object-fit: contain;
+}
+
+.thread-image-placeholder {
+  width: 280px;
+  min-height: 168px;
+  border-radius: inherit;
+  background: rgba(248, 248, 250, 0.96);
+  color: #81818a;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px;
 }
 
 .thread-file-list {
@@ -1283,6 +1370,13 @@
   padding: 0 0 22px;
 }
 
+.thread-answer-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
 .thread-label-row {
   display: flex;
   align-items: center;
@@ -1325,6 +1419,7 @@
 .thread-answer-body ol,
 .thread-answer-body blockquote,
 .thread-answer-body pre,
+.thread-code-block,
 .thread-answer-body table,
 .thread-answer-body hr {
   margin: 0 0 16px;
@@ -1381,23 +1476,106 @@
   font-family: Consolas, 'SFMono-Regular', Monaco, 'Courier New', monospace;
 }
 
-.thread-answer-body pre {
-  overflow-x: auto;
-  padding: 16px 18px;
-  border-radius: 16px;
-  background: rgba(24, 27, 39, 0.96);
-  color: #f4f7ff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+.thread-code-block {
+  overflow: hidden;
+  border-radius: 18px;
+  background: #171717;
+  color: #f8f8fb;
+  border: 1px solid rgba(20, 20, 24, 0.06);
 }
 
-.thread-answer-body pre code {
+.thread-code-block-head {
+  min-height: 46px;
+  padding: 0 14px 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.thread-code-block-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.thread-code-block-icon,
+.thread-code-block-copy {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.thread-code-block-icon {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.thread-code-block-language {
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 15px;
+  font-weight: 500;
+  font-family:
+    'SF Pro Rounded',
+    'SF Pro Display',
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Arial Rounded MT Bold',
+    sans-serif;
+}
+
+.thread-code-block-copy {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  transition: opacity 0.18s ease, color 0.18s ease;
+}
+
+.thread-code-block-copy:hover,
+.thread-code-block-copy:focus-visible {
+  color: #ffffff;
+}
+
+.thread-code-block-copy.is-copied {
+  color: #7ee787;
+}
+
+.thread-code-block-copy svg,
+.thread-code-block-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.thread-code-block-body {
+  overflow-x: auto;
+}
+
+.thread-code-block-body pre {
+  margin: 0;
+  padding: 18px 20px 20px;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+}
+
+.thread-code-block-body pre code {
+  display: block;
   padding: 0;
   border-radius: 0;
   background: transparent;
   color: inherit;
-  font-size: 0.88em;
+  font-size: 14px;
+  line-height: 1.75;
 }
 
+.thread-code-block-body .hljs {
+  background: transparent;
+}
 .thread-answer-body blockquote {
   padding: 10px 16px;
   border-left: 3px solid rgba(90, 104, 255, 0.42);

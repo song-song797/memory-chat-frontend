@@ -48,6 +48,29 @@ function normalizeAttachment(attachment: Attachment): Attachment {
   };
 }
 
+export async function fetchAttachmentBlobUrl(
+  contentUrl: string
+): Promise<{ url: string; revokeOnCleanup: boolean }> {
+  if (/^(blob:|data:|https?:\/\/)/i.test(contentUrl) && !contentUrl.includes('/api/attachments/')) {
+    return {
+      url: contentUrl,
+      revokeOnCleanup: false,
+    };
+  }
+
+  const res = await apiFetch(contentUrl);
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to load attachment');
+    throw new Error(errorMessage);
+  }
+
+  const blob = await res.blob();
+  return {
+    url: URL.createObjectURL(blob),
+    revokeOnCleanup: true,
+  };
+}
+
 function normalizeMessage(message: Message): Message {
   return {
     ...message,
@@ -170,10 +193,17 @@ export async function updateConversationTitle(
   conversationId: string,
   title: string
 ): Promise<Conversation> {
+  return updateConversation(conversationId, { title });
+}
+
+export async function updateConversation(
+  conversationId: string,
+  updates: { title?: string; pinned?: boolean }
+): Promise<Conversation> {
   const res = await apiFetch(`${API_BASE}/conversations/${conversationId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(updates),
   });
   if (!res.ok) {
     const errorMessage = await getErrorMessage(res, 'Failed to update conversation');

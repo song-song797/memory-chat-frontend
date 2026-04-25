@@ -9,6 +9,8 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   onClearAll: () => void;
   onOpenSettings: () => void;
   onLogout: () => void;
@@ -53,18 +55,27 @@ function getUserInitials(email: string): string {
 
 function ConversationMenu({
   conversationId,
+  title,
+  pinned,
   isOpen,
   onToggle,
+  onRename,
+  onTogglePin,
   onDelete,
 }: {
   conversationId: string;
+  title: string;
+  pinned: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   onDelete: (id: string) => void;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -108,9 +119,17 @@ function ConversationMenu({
           event.stopPropagation();
           onToggle();
         }}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+        }}
       >
         <Icon name="more-1" />
       </button>
+      {pinned ? (
+        <span className="shell-conversation-pin" aria-label="Pinned conversation">
+          <Icon name="pin" />
+        </span>
+      ) : null}
       {isOpen && menuPosition && isMounted
         ? createPortal(
             <div
@@ -120,22 +139,90 @@ function ConversationMenu({
                 left: `${menuPosition.left}px`,
               }}
             >
-              <button type="button" className="shell-conversation-menu-item" disabled>
+              <button
+                type="button"
+                className="shell-conversation-menu-item"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsDeleteDialogOpen(false);
+                  onTogglePin(conversationId, pinned);
+                }}
+              >
                 <Icon name="pin" />
-                <span>置顶</span>
+                <span>{pinned ? '取消置顶' : '置顶'}</span>
               </button>
-              <button type="button" className="shell-conversation-menu-item" disabled>
+              <button
+                type="button"
+                className="shell-conversation-menu-item"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsDeleteDialogOpen(false);
+                  onRename(conversationId, title);
+                }}
+              >
                 <Icon name="pen" />
                 <span>重命名</span>
               </button>
               <button
                 type="button"
                 className="shell-conversation-menu-item is-danger"
-                onClick={() => onDelete(conversationId)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsDeleteDialogOpen(true);
+                  onToggle();
+                }}
               >
                 <Icon name="delete" />
                 <span>删除</span>
               </button>
+            </div>,
+            document.body
+          )
+        : null}
+      {isDeleteDialogOpen && isMounted
+        ? createPortal(
+            <div className="shell-confirm-layer" role="presentation">
+              <button
+                type="button"
+                className="shell-confirm-backdrop"
+                aria-label="Close delete confirmation"
+                onClick={() => setIsDeleteDialogOpen(false)}
+              />
+              <div
+                className="shell-confirm-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={`delete-conversation-title-${conversationId}`}
+              >
+                <h3
+                  id={`delete-conversation-title-${conversationId}`}
+                  className="shell-confirm-title"
+                >
+                  确认删除会话？
+                </h3>
+                <p className="shell-confirm-text">
+                  删除后将无法恢复，确认删除“{title}”吗？
+                </p>
+                <div className="shell-confirm-actions">
+                  <button
+                    type="button"
+                    className="shell-confirm-button"
+                    onClick={() => setIsDeleteDialogOpen(false)}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="shell-confirm-button is-danger"
+                    onClick={() => {
+                      setIsDeleteDialogOpen(false);
+                      onDelete(conversationId);
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
             </div>,
             document.body
           )
@@ -148,16 +235,30 @@ function ConversationList({
   conversations,
   activeId,
   openConversationMenuId,
+  editingConversationId,
+  editingTitle,
   onSelect,
   onToggleMenu,
+  onRename,
+  onTogglePin,
   onDelete,
+  onEditingTitleChange,
+  onEditingSubmit,
+  onEditingCancel,
 }: {
   conversations: Conversation[];
   activeId: string | null;
   openConversationMenuId: string | null;
+  editingConversationId: string | null;
+  editingTitle: string;
   onSelect: (id: string) => void;
   onToggleMenu: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   onDelete: (id: string) => void;
+  onEditingTitleChange: (value: string) => void;
+  onEditingSubmit: () => void;
+  onEditingCancel: () => void;
 }) {
   if (conversations.length === 0) {
     return null;
@@ -167,6 +268,7 @@ function ConversationList({
     <div className="shell-conversation-list">
       {conversations.map((conversation) => {
         const isActive = conversation.id === activeId;
+        const isEditing = conversation.id === editingConversationId;
 
         return (
           <div
@@ -174,21 +276,55 @@ function ConversationList({
             className={`shell-conversation-item ${isActive ? 'is-active' : ''}`}
             onClick={() => onSelect(conversation.id)}
           >
-            <button
-              type="button"
-              className="shell-conversation-select"
-              onClick={() => onSelect(conversation.id)}
-            >
-              <span className="shell-conversation-title">
-                {formatConversationTitle(conversation.title)}
-              </span>
-            </button>
+            {isEditing ? (
+              <div className="shell-conversation-select">
+                <input
+                  type="text"
+                  className="shell-conversation-rename-input"
+                  value={editingTitle}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onChange={(event) => onEditingTitleChange(event.target.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onBlur={onEditingSubmit}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      onEditingSubmit();
+                    }
 
-            <span className="shell-conversation-actions">
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      onEditingCancel();
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="shell-conversation-select"
+                onClick={() => onSelect(conversation.id)}
+              >
+                <span className="shell-conversation-title">
+                  {formatConversationTitle(conversation.title)}
+                </span>
+              </button>
+            )}
+
+            <span
+              className="shell-conversation-actions"
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
               <ConversationMenu
                 conversationId={conversation.id}
+                title={conversation.title}
+                pinned={conversation.pinned}
                 isOpen={openConversationMenuId === conversation.id}
                 onToggle={() => onToggleMenu(conversation.id)}
+                onRename={onRename}
+                onTogglePin={onTogglePin}
                 onDelete={onDelete}
               />
             </span>
@@ -205,6 +341,8 @@ export default function Sidebar({
   onSelect,
   onNew,
   onDelete,
+  onRename,
+  onTogglePin,
   onClearAll,
   onOpenSettings,
   onLogout,
@@ -217,6 +355,8 @@ export default function Sidebar({
 }: SidebarProps) {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isClearConfirming, setIsClearConfirming] = useState(false);
@@ -289,6 +429,43 @@ export default function Sidebar({
   const handleConversationDelete = (id: string) => {
     setOpenConversationMenuId(null);
     onDelete(id);
+  };
+
+  const handleConversationRename = (id: string, currentTitle: string) => {
+    setOpenConversationMenuId(null);
+    setEditingConversationId(id);
+    setEditingTitle(currentTitle);
+  };
+
+  const handleConversationPinToggle = (id: string, pinned: boolean) => {
+    setOpenConversationMenuId(null);
+    onTogglePin(id, pinned);
+  };
+
+  const handleRenameSubmit = () => {
+    if (!editingConversationId) {
+      return;
+    }
+
+    const targetConversation = conversations.find(
+      (conversation) => conversation.id === editingConversationId
+    );
+    const nextTitle = editingTitle.trim();
+
+    setEditingConversationId(null);
+
+    if (!targetConversation || !nextTitle || nextTitle === targetConversation.title) {
+      setEditingTitle('');
+      return;
+    }
+
+    setEditingTitle('');
+    onRename(editingConversationId, nextTitle);
+  };
+
+  const handleRenameCancel = () => {
+    setEditingConversationId(null);
+    setEditingTitle('');
   };
 
   const handleToggleSearch = () => {
@@ -446,11 +623,18 @@ export default function Sidebar({
                   conversations={filteredConversations}
                   activeId={activeId}
                   openConversationMenuId={openConversationMenuId}
+                  editingConversationId={editingConversationId}
+                  editingTitle={editingTitle}
                   onSelect={onSelect}
                   onToggleMenu={(id) =>
                     setOpenConversationMenuId((prev) => (prev === id ? null : id))
                   }
+                  onRename={handleConversationRename}
+                  onTogglePin={handleConversationPinToggle}
                   onDelete={handleConversationDelete}
+                  onEditingTitleChange={setEditingTitle}
+                  onEditingSubmit={handleRenameSubmit}
+                  onEditingCancel={handleRenameCancel}
                 />
                 {filteredConversations.length === 0 ? (
                   <div className="shell-search-empty">
@@ -465,11 +649,18 @@ export default function Sidebar({
                   conversations={primaryConversations}
                   activeId={activeId}
                   openConversationMenuId={openConversationMenuId}
+                  editingConversationId={editingConversationId}
+                  editingTitle={editingTitle}
                   onSelect={onSelect}
                   onToggleMenu={(id) =>
                     setOpenConversationMenuId((prev) => (prev === id ? null : id))
                   }
+                  onRename={handleConversationRename}
+                  onTogglePin={handleConversationPinToggle}
                   onDelete={handleConversationDelete}
+                  onEditingTitleChange={setEditingTitle}
+                  onEditingSubmit={handleRenameSubmit}
+                  onEditingCancel={handleRenameCancel}
                 />
 
                 {primaryConversations.length === 0 ? (
@@ -483,11 +674,18 @@ export default function Sidebar({
                   conversations={recentConversations}
                   activeId={activeId}
                   openConversationMenuId={openConversationMenuId}
+                  editingConversationId={editingConversationId}
+                  editingTitle={editingTitle}
                   onSelect={onSelect}
                   onToggleMenu={(id) =>
                     setOpenConversationMenuId((prev) => (prev === id ? null : id))
                   }
+                  onRename={handleConversationRename}
+                  onTogglePin={handleConversationPinToggle}
                   onDelete={handleConversationDelete}
+                  onEditingTitleChange={setEditingTitle}
+                  onEditingSubmit={handleRenameSubmit}
+                  onEditingCancel={handleRenameCancel}
                 />
 
                 {recentConversations.length === 0 ? (

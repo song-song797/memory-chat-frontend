@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import hljs from 'highlight.js/lib/common';
+import { codeToHtml } from 'shiki';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import { fetchAttachmentBlobUrl } from '../services/api';
 import type { Attachment, ComposerAttachment, Message } from '../types';
 import { message } from '../services/message';
 import ChatInput from './ChatInput';
@@ -126,17 +129,39 @@ const THREAD_ACTIONS: ThreadActionConfig[] = [
   },
 ];
 
+const USER_THREAD_ACTIONS: ThreadActionConfig[] = [
+  {
+    key: 'copy',
+    icon: 'copy',
+    activeIcon: 'check-circle',
+    tooltip: 'Copy',
+    ariaLabel: 'Copy message',
+    activeAriaLabel: 'Copied',
+  },
+  {
+    key: 'share',
+    icon: 'share',
+    tooltip: 'Share',
+    ariaLabel: 'Share message',
+  },
+  {
+    key: 'more',
+    icon: 'more-1',
+    tooltip: 'More',
+    ariaLabel: 'More actions',
+  },
+];
+
 function normalizeMarkdownContent(content: string) {
   let normalized = content;
 
   normalized = normalized.replace(/\*\*"([^*]+?)"\*\*/g, '"**$1**"');
   normalized = normalized.replace(/\*\*'([^*]+?)'\*\*/g, "'**$1**'");
-  normalized = normalized.replace(/\*\*“([^*]+?)”\*\*/g, '“**$1**”');
-  normalized = normalized.replace(/\*\*‘([^*]+?)’\*\*/g, '‘**$1**’');
+  normalized = normalized.replace(/\*\*\u201c([^*]+?)\u201d\*\*/g, '\u201c**$1**\u201d');
+  normalized = normalized.replace(/\*\*\u2018([^*]+?)\u2019\*\*/g, '\u2018**$1**\u2019');
 
   return normalized;
 }
-
 function formatAttachmentSize(sizeBytes: number) {
   if (sizeBytes >= 1024 * 1024) {
     return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -145,15 +170,231 @@ function formatAttachmentSize(sizeBytes: number) {
   return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
 }
 
+function formatCodeLanguage(language: string | null) {
+  if (!language) {
+    return 'Code';
+  }
+
+  const normalized = language.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    bash: 'Bash',
+    c: 'C',
+    cpp: 'C++',
+    csharp: 'C#',
+    css: 'CSS',
+    go: 'Go',
+    golang: 'Go',
+    html: 'HTML',
+    java: 'Java',
+    javascript: 'JavaScript',
+    js: 'JavaScript',
+    json: 'JSON',
+    jsx: 'JSX',
+    kotlin: 'Kotlin',
+    markdown: 'Markdown',
+    md: 'Markdown',
+    php: 'PHP',
+    powershell: 'PowerShell',
+    py: 'Python',
+    python: 'Python',
+    ruby: 'Ruby',
+    rs: 'Rust',
+    rust: 'Rust',
+    sh: 'Shell',
+    shell: 'Shell',
+    sql: 'SQL',
+    swift: 'Swift',
+    ts: 'TypeScript',
+    tsx: 'TSX',
+    typescript: 'TypeScript',
+    xml: 'XML',
+    yaml: 'YAML',
+    yml: 'YAML',
+  };
+
+  return labels[normalized] ?? normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function detectCodeLanguage(code: string, language: string | null) {
+  const explicitLanguage = language?.trim().toLowerCase() ?? '';
+
+  if (explicitLanguage && hljs.getLanguage(explicitLanguage)) {
+    return explicitLanguage;
+  }
+
+  const autoDetected = hljs.highlightAuto(code.replace(/\n$/, ''));
+
+  return autoDetected.language ?? (explicitLanguage || null);
+}
+
+function CodeBlock({
+  code,
+  language,
+}: {
+  code: string;
+  language: string | null;
+}) {
+  const [isCopied, setIsCopied] = useState(false);
+  const [highlightedHtml, setHighlightedHtml] = useState('');
+  const copyTimerRef = useRef<number | null>(null);
+  const detectedLanguage = detectCodeLanguage(code, language);
+  const languageLabel = formatCodeLanguage(detectedLanguage ?? language);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setIsCopied(true);
+
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+
+      copyTimerRef.current = window.setTimeout(() => {
+        setIsCopied(false);
+        copyTimerRef.current = null;
+      }, 1200);
+    } catch {
+      message.error({
+        content: 'Failed to copy code',
+        placement: 'top',
+      });
+    }
+  };
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    void codeToHtml(code, {
+      lang: detectedLanguage ?? 'text',
+      theme: 'github-dark',
+    })
+      .then((html) => {
+        if (!isCancelled) {
+          setHighlightedHtml(html);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setHighlightedHtml('');
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, [code, detectedLanguage]);
+
+  return (
+    <div className="thread-code-block">
+      <div className="thread-code-block-head">
+        <div className="thread-code-block-meta">
+          <span className="thread-code-block-icon" aria-hidden="true">
+            <Icon name="code" />
+          </span>
+          <span className="thread-code-block-language">{languageLabel}</span>
+        </div>
+        <button
+          type="button"
+          className={`thread-code-block-copy ${isCopied ? 'is-copied' : ''}`}
+          aria-label={isCopied ? 'Copied' : 'Copy code'}
+          onClick={handleCopy}
+        >
+          <Icon name={isCopied ? 'check-circle' : 'copy'} />
+        </button>
+      </div>
+      <div className="thread-code-block-body">
+        {highlightedHtml ? (
+          <div dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        ) : (
+          <pre>
+            <code>{code}</code>
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MarkdownMessage({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
+      components={{
+        code({ className, children, ...props }) {
+          const code = String(children).replace(/\n$/, '');
+          const languageMatch = /language-([\w-]+)/.exec(className ?? '');
+          const language = languageMatch?.[1] ?? null;
+          const isBlock = Boolean(languageMatch) || code.includes('\n');
+
+          if (!isBlock) {
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+          }
+
+          return <CodeBlock code={code} language={language} />;
+        },
+      }}
     >
       {normalizeMarkdownContent(content)}
     </ReactMarkdown>
   );
+}
+
+function AttachmentImage({ attachment }: { attachment: Attachment }) {
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+    let objectUrlToRevoke: string | null = null;
+
+    setResolvedUrl(null);
+    setHasError(false);
+
+    void fetchAttachmentBlobUrl(attachment.content_url)
+      .then(({ url, revokeOnCleanup }) => {
+        if (isCancelled) {
+          if (revokeOnCleanup) {
+            URL.revokeObjectURL(url);
+          }
+          return;
+        }
+
+        if (revokeOnCleanup) {
+          objectUrlToRevoke = url;
+        }
+
+        setResolvedUrl(url);
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setHasError(true);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+    };
+  }, [attachment.content_url]);
+
+  if (hasError) {
+    return <div className="thread-image-placeholder">{"\u56fe\u7247\u52a0\u8f7d\u5931\u8d25"}</div>;
+  }
+
+  if (!resolvedUrl) {
+    return <div className="thread-image-placeholder">{"\u56fe\u7247\u52a0\u8f7d\u4e2d..."}</div>;
+  }
+  return <img src={resolvedUrl} alt={attachment.name} />;
 }
 
 function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
@@ -165,19 +406,13 @@ function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
   const fileAttachments = attachments.filter((attachment) => attachment.kind !== 'image');
 
   return (
-    <div className="thread-attachments">
+    <div className={`thread-attachments ${imageAttachments.length > 0 ? 'has-images' : ''}`}>
       {imageAttachments.length > 0 ? (
         <div className="thread-image-grid">
           {imageAttachments.map((attachment) => (
-            <a
-              key={attachment.id}
-              className="thread-image-card"
-              href={attachment.content_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <img src={attachment.content_url} alt={attachment.name} />
-            </a>
+            <div key={attachment.id} className="thread-image-card">
+              <AttachmentImage attachment={attachment} />
+            </div>
           ))}
         </div>
       ) : null}
@@ -476,6 +711,7 @@ export default function ChatWindow({
                   >
                     {item.role === 'user' && (
                       <div className="thread-user-block">
+                        <AttachmentGallery attachments={attachments} />
                         {hasUserText ? (
                           <div className="thread-head is-user">
                             <div className="thread-userline is-user">
@@ -483,65 +719,91 @@ export default function ChatWindow({
                             </div>
                           </div>
                         ) : null}
-                        <AttachmentGallery attachments={attachments} />
                         {hasUserText ? (
                           <div className="thread-user-footer">
-                            <button
-                              type="button"
-                              className={`thread-user-copy-button ${isCopied ? 'is-active' : ''}`}
-                              aria-label={isCopied ? 'Copied' : 'Copy message'}
-                              data-tooltip={isCopied ? '' : 'Copy'}
-                              onClick={() => void handleCopy(item.id, item.content)}
-                            >
-                              <Icon name={isCopied ? 'check-circle' : 'copy'} />
-                            </button>
+                            <div className={`thread-actions thread-user-actions ${isCopied ? 'is-visible' : ''}`}>
+                              {USER_THREAD_ACTIONS.map((action) => {
+                                const isActive =
+                                  activeActionFeedback?.messageId === item.id &&
+                                  activeActionFeedback.action === action.key;
+                                const tooltip = isActive ? '' : action.tooltip;
+                                const iconName =
+                                  isActive && action.activeIcon ? action.activeIcon : action.icon;
+                                const ariaLabel =
+                                  isActive && action.activeAriaLabel
+                                    ? action.activeAriaLabel
+                                    : action.ariaLabel;
+
+                                const handleClick = () => {
+                                  if (action.key === 'copy') {
+                                    return void handleCopy(item.id, item.content);
+                                  }
+                                };
+
+                                return (
+                                  <button
+                                    key={action.key}
+                                    type="button"
+                                    className={`thread-action-pill ${isActive ? 'is-active' : ''}`}
+                                    aria-label={ariaLabel}
+                                    data-tooltip={tooltip}
+                                    onClick={handleClick}
+                                  >
+                                    <Icon name={iconName} />
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         ) : null}
                       </div>
                     )}
 
                     {item.role === 'assistant' && (
-                      <div className="thread-answer-card">
-                        <div className="thread-label-row">
-                          <span className="thread-brand-label">CHAT A.I+</span>
-                          <span className="thread-brand-badge" />
-                        </div>
-                        <div className="thread-answer-body">
-                          <MarkdownMessage content={item.content} />
-                        </div>
-                        <div className="thread-answer-footer">
-                          <div className="thread-actions">
-                            {THREAD_ACTIONS.map((action) => {
-                              const isActive =
-                                activeActionFeedback?.messageId === item.id &&
-                                activeActionFeedback.action === action.key;
-                              const tooltip = isActive ? '' : action.tooltip;
-                              const iconName =
-                                isActive && action.activeIcon ? action.activeIcon : action.icon;
-                              const ariaLabel =
-                                isActive && action.activeAriaLabel
-                                  ? action.activeAriaLabel
-                                  : action.ariaLabel;
+                      <div className="thread-answer-wrap">
+                        <AttachmentGallery attachments={attachments} />
+                        <div className="thread-answer-card">
+                          <div className="thread-label-row">
+                            <span className="thread-brand-label">CHAT A.I+</span>
+                            <span className="thread-brand-badge" />
+                          </div>
+                          <div className="thread-answer-body">
+                            <MarkdownMessage content={item.content} />
+                          </div>
+                          <div className="thread-answer-footer">
+                            <div className="thread-actions">
+                              {THREAD_ACTIONS.map((action) => {
+                                const isActive =
+                                  activeActionFeedback?.messageId === item.id &&
+                                  activeActionFeedback.action === action.key;
+                                const tooltip = isActive ? '' : action.tooltip;
+                                const iconName =
+                                  isActive && action.activeIcon ? action.activeIcon : action.icon;
+                                const ariaLabel =
+                                  isActive && action.activeAriaLabel
+                                    ? action.activeAriaLabel
+                                    : action.ariaLabel;
 
-                              const handleClick = () => {
-                                if (action.key === 'copy') {
-                                  return void handleCopy(item.id, item.content);
-                                }
-                              };
+                                const handleClick = () => {
+                                  if (action.key === 'copy') {
+                                    return void handleCopy(item.id, item.content);
+                                  }
+                                };
 
-                              return (
-                                <button
-                                  key={action.key}
-                                  type="button"
-                                  className={`thread-action-pill ${isActive ? 'is-active' : ''}`}
-                                  aria-label={ariaLabel}
-                                  data-tooltip={tooltip}
-                                  onClick={handleClick}
-                                >
-                                  <Icon name={iconName} />
-                                </button>
-                              );
-                            })}
+                                return (
+                                  <button
+                                    key={action.key}
+                                    type="button"
+                                    className={`thread-action-pill ${isActive ? 'is-active' : ''}`}
+                                    aria-label={ariaLabel}
+                                    data-tooltip={tooltip}
+                                    onClick={handleClick}
+                                  >
+                                    <Icon name={iconName} />
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       </div>

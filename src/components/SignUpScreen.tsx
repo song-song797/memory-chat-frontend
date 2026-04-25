@@ -38,6 +38,7 @@ export default function SignUpScreen({
   const [isAgentLoading, setIsAgentLoading] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const agentAbortRef = useRef<AbortController | null>(null);
+  const lastErrorRef = useRef('');
 
   const heading = useMemo(
     () => (mode === 'signup' ? 'Create your account' : 'Welcome back'),
@@ -68,6 +69,21 @@ export default function SignUpScreen({
       agentAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    const nextError = localError || errorMessage;
+    if (!nextError) {
+      lastErrorRef.current = '';
+      return;
+    }
+
+    if (lastErrorRef.current === nextError) {
+      return;
+    }
+
+    lastErrorRef.current = nextError;
+    message.error(nextError);
+  }, [errorMessage, localError]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -299,12 +315,6 @@ export default function SignUpScreen({
                 </button>
               </div>
             </label>
-
-            {localError || errorMessage ? (
-              <div className="sign-error-banner" role="alert">
-                {localError || errorMessage}
-              </div>
-            ) : null}
 
             <p className="sign-terms">
               By continuing, you agree to the{' '}

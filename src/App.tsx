@@ -337,6 +337,60 @@ export default function App() {
     [activeConvId, refreshConversations]
   );
 
+  const handleRenameConversation = useCallback(
+    async (id: string, nextTitle: string) => {
+      if (!nextTitle) {
+        toast.warning({
+          content: '会话名称不能为空',
+          placement: 'top',
+        });
+        return;
+      }
+
+      try {
+        await api.updateConversation(id, { title: nextTitle });
+        await refreshConversations();
+        toast.success({
+          content: '会话已重命名',
+          placement: 'top',
+        });
+      } catch (err) {
+        console.error(err);
+        const nextError =
+          err instanceof Error ? err.message : 'Failed to rename conversation';
+        setErrorMessage(nextError);
+        toast.error({
+          content: nextError,
+          placement: 'top',
+        });
+      }
+    },
+    [refreshConversations]
+  );
+
+  const handleTogglePinConversation = useCallback(
+    async (id: string, pinned: boolean) => {
+      try {
+        await api.updateConversation(id, { pinned: !pinned });
+        await refreshConversations();
+        toast.success({
+          content: pinned ? '已取消置顶' : '已置顶会话',
+          placement: 'top',
+        });
+      } catch (err) {
+        console.error(err);
+        const nextError =
+          err instanceof Error ? err.message : 'Failed to update conversation';
+        setErrorMessage(nextError);
+        toast.error({
+          content: nextError,
+          placement: 'top',
+        });
+      }
+    },
+    [refreshConversations]
+  );
+
   const handleClearAllConversations = useCallback(async () => {
     if (isClearingConversations) return;
 
@@ -505,6 +559,8 @@ export default function App() {
         onSelect={handleSelectConversation}
         onNew={handleNewChat}
         onDelete={handleDeleteConversation}
+        onRename={handleRenameConversation}
+        onTogglePin={handleTogglePinConversation}
         onClearAll={handleClearAllConversations}
         onOpenSettings={() => {
           setIsMobileSidebarOpen(false);
