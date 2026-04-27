@@ -12,6 +12,7 @@ interface SettingsDrawerProps {
   memories: Memory[];
   memoryDraft: string;
   isMemoriesLoading: boolean;
+  isMemoryMutating: boolean;
   onMemoryDraftChange: (value: string) => void;
   onCreateMemory: () => void;
   onToggleMemory: (memory: Memory) => void;
@@ -82,6 +83,7 @@ export default function SettingsDrawer({
   memories,
   memoryDraft,
   isMemoriesLoading,
+  isMemoryMutating,
   onMemoryDraftChange,
   onCreateMemory,
   onToggleMemory,
@@ -156,6 +158,7 @@ export default function SettingsDrawer({
           memories={memories}
           draft={memoryDraft}
           isLoading={isMemoriesLoading}
+          isMutating={isMemoryMutating}
           onDraftChange={onMemoryDraftChange}
           onCreate={onCreateMemory}
           onToggle={onToggleMemory}

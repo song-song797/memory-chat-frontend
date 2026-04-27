@@ -4,6 +4,7 @@ interface MemorySettingsSectionProps {
   memories: Memory[];
   draft: string;
   isLoading: boolean;
+  isMutating: boolean;
   onDraftChange: (value: string) => void;
   onCreate: () => void;
   onToggle: (memory: Memory) => void;
@@ -27,6 +28,7 @@ export default function MemorySettingsSection({
   memories,
   draft,
   isLoading,
+  isMutating,
   onDraftChange,
   onCreate,
   onToggle,
@@ -46,7 +48,7 @@ export default function MemorySettingsSection({
           placeholder="添加一条记忆"
           aria-label="添加一条记忆"
         />
-        <button type="button" onClick={onCreate} disabled={!draft.trim() || isLoading}>
+        <button type="button" onClick={onCreate} disabled={!draft.trim() || isLoading || isMutating}>
           添加
         </button>
       </div>
@@ -62,10 +64,10 @@ export default function MemorySettingsSection({
                 <span>{memory.content}</span>
               </div>
               <div className="memory-item-actions">
-                <button type="button" onClick={() => onToggle(memory)}>
+                <button type="button" onClick={() => onToggle(memory)} disabled={isLoading || isMutating}>
                   {memory.enabled ? '停用' : '启用'}
                 </button>
-                <button type="button" onClick={() => onDelete(memory)}>
+                <button type="button" onClick={() => onDelete(memory)} disabled={isLoading || isMutating}>
                   删除
                 </button>
               </div>

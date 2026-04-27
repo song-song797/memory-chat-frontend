@@ -107,15 +107,21 @@ export default function App() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoryDraft, setMemoryDraft] = useState('');
   const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
+  const [isMemoryMutating, setIsMemoryMutating] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isClearingConversations, setIsClearingConversations] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
   });
+  const activeUserId = currentUser?.id ?? null;
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
+  const memoryRequestSeqRef = useRef(0);
+  const currentUserIdRef = useRef<string | null>(null);
+  const isSettingsOpenRef = useRef(false);
 
   const resetChatState = useCallback(() => {
+    memoryRequestSeqRef.current += 1;
     setConversations([]);
     setActiveConvId(null);
     setMessages([]);
@@ -127,8 +133,17 @@ export default function App() {
     setMemories([]);
     setMemoryDraft('');
     setIsMemoriesLoading(false);
+    setIsMemoryMutating(false);
     setIsMobileSidebarOpen(false);
   }, []);
+
+  useEffect(() => {
+    currentUserIdRef.current = activeUserId;
+  }, [activeUserId]);
+
+  useEffect(() => {
+    isSettingsOpenRef.current = isSettingsOpen;
+  }, [isSettingsOpen]);
 
   useEffect(() => {
     const bootstrapAuth = async () => {
@@ -257,32 +272,55 @@ export default function App() {
     setErrorMessage('');
   }, []);
 
-  const refreshMemories = useCallback(async () => {
-    setIsMemoriesLoading(true);
-    try {
-      const nextMemories = await api.fetchMemories();
-      setMemories(nextMemories);
-      setErrorMessage('');
-    } catch (err) {
-      console.error(err);
-      const nextError = err instanceof Error ? err.message : 'Failed to fetch memories';
-      setErrorMessage(nextError);
-      toast.error({
-        content: nextError,
-        placement: 'top',
-      });
-    } finally {
-      setIsMemoriesLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    if (!currentUser || !isSettingsOpen) {
+    if (!activeUserId || !isSettingsOpen) {
       return;
     }
 
-    void refreshMemories();
-  }, [currentUser, isSettingsOpen, refreshMemories]);
+    const requestSeq = memoryRequestSeqRef.current + 1;
+    const userId = activeUserId;
+    let isActive = true;
+    memoryRequestSeqRef.current = requestSeq;
+
+    const isStale = () =>
+      !isActive ||
+      memoryRequestSeqRef.current !== requestSeq ||
+      currentUserIdRef.current !== userId ||
+      !isSettingsOpenRef.current;
+
+    void (async () => {
+      await Promise.resolve();
+      if (isStale()) return;
+
+      setIsMemoriesLoading(true);
+      try {
+        const nextMemories = await api.fetchMemories();
+        if (isStale()) return;
+
+        setMemories(nextMemories);
+        setErrorMessage('');
+      } catch (err) {
+        if (isStale()) return;
+
+        console.error(err);
+        const nextError = err instanceof Error ? err.message : 'Failed to fetch memories';
+        setErrorMessage(nextError);
+        toast.error({
+          content: nextError,
+          placement: 'top',
+        });
+      } finally {
+        if (!isStale()) {
+          setIsMemoriesLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+      memoryRequestSeqRef.current += 1;
+    };
+  }, [activeUserId, isSettingsOpen]);
 
   const handleAuthSubmit = useCallback(
     async (mode: 'signup' | 'login', email: string, password: string) => {
@@ -457,10 +495,14 @@ export default function App() {
 
   const handleCreateMemory = useCallback(async () => {
     const content = memoryDraft.trim();
-    if (!content) return;
+    const userId = activeUserId;
+    if (!content || !userId || isMemoryMutating) return;
 
+    setIsMemoryMutating(true);
     try {
       const memory = await api.createMemory(content);
+      if (currentUserIdRef.current !== userId) return;
+
       setMemories((prev) => [memory, ...prev]);
       setMemoryDraft('');
       setErrorMessage('');
@@ -476,14 +518,22 @@ export default function App() {
         content: nextError,
         placement: 'top',
       });
+    } finally {
+      setIsMemoryMutating(false);
     }
-  }, [memoryDraft]);
+  }, [activeUserId, isMemoryMutating, memoryDraft]);
 
   const handleToggleMemory = useCallback(async (memory: Memory) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    setIsMemoryMutating(true);
     try {
       const updatedMemory = await api.updateMemory(memory.id, {
         enabled: !memory.enabled,
       });
+      if (currentUserIdRef.current !== userId) return;
+
       setMemories((prev) =>
         prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
       );
@@ -500,12 +550,20 @@ export default function App() {
         content: nextError,
         placement: 'top',
       });
+    } finally {
+      setIsMemoryMutating(false);
     }
-  }, []);
+  }, [activeUserId, isMemoryMutating]);
 
   const handleDeleteMemory = useCallback(async (memory: Memory) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    setIsMemoryMutating(true);
     try {
       await api.deleteMemory(memory.id);
+      if (currentUserIdRef.current !== userId) return;
+
       setMemories((prev) => prev.filter((item) => item.id !== memory.id));
       setErrorMessage('');
       toast.success({
@@ -520,8 +578,10 @@ export default function App() {
         content: nextError,
         placement: 'top',
       });
+    } finally {
+      setIsMemoryMutating(false);
     }
-  }, []);
+  }, [activeUserId, isMemoryMutating]);
 
   const handleSend = useCallback(
     async ({
@@ -724,6 +784,7 @@ export default function App() {
         memories={memories}
         memoryDraft={memoryDraft}
         isMemoriesLoading={isMemoriesLoading}
+        isMemoryMutating={isMemoryMutating}
         onMemoryDraftChange={setMemoryDraft}
         onCreateMemory={handleCreateMemory}
         onToggleMemory={handleToggleMemory}
