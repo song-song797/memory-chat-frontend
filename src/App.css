@@ -786,6 +786,191 @@
   color: #d14d4d;
 }
 
+.shell-section-head--projects {
+  margin-bottom: 8px;
+}
+
+.shell-project-add,
+.shell-project-action {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.shell-project-add {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 8px;
+  color: #5d66ff;
+  font-size: 18px;
+  line-height: 1;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.shell-project-add:hover,
+.shell-project-add:focus-visible {
+  background: rgba(93, 102, 255, 0.08);
+}
+
+.shell-project-list {
+  display: grid;
+  gap: 12px;
+}
+
+.shell-project-group {
+  display: grid;
+  gap: 4px;
+}
+
+.shell-project-group.is-active .shell-project-header {
+  color: #424aff;
+}
+
+.shell-project-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 8px 0 12px;
+  color: #6f7078;
+}
+
+.shell-project-title {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.shell-project-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-project-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.shell-project-action {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 8px;
+  color: #8b8b93;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.78;
+  transition: background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+
+.shell-project-action:hover,
+.shell-project-action:focus-visible {
+  background: rgba(93, 102, 255, 0.08);
+  color: #424aff;
+  opacity: 1;
+}
+
+.shell-project-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.shell-project-empty {
+  padding: 8px 12px 10px;
+  color: #b0b0b7;
+  font-size: 12px;
+}
+
+.project-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 18, 24, 0.2);
+  z-index: 80;
+}
+
+.project-dialog {
+  width: min(100% - 32px, 360px);
+  padding: 20px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--surface-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.project-dialog h2 {
+  margin: 0;
+  color: #22232b;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.project-dialog input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  outline: none;
+  background: rgba(244, 245, 249, 0.98);
+  color: #26262b;
+  font: inherit;
+  font-size: 14px;
+  box-shadow: inset 0 0 0 1px rgba(93, 102, 255, 0.08);
+}
+
+.project-dialog input:focus,
+.project-dialog input:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(93, 102, 255, 0.24), 0 0 0 3px rgba(93, 102, 255, 0.12);
+}
+
+.project-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.project-dialog-actions button {
+  min-width: 82px;
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(90, 102, 255, 0.08);
+  color: #343649;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.project-dialog-actions button:last-child {
+  background: #5d66ff;
+  color: #ffffff;
+}
+
+.project-dialog-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .shell-divider {
   margin: 14px 0 18px;
   height: 1px;

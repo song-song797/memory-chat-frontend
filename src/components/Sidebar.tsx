@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Conversation, User } from '../types';
+import type { Conversation, Project, User } from '../types';
 import Icon from './Icons';
+import ProjectFormDialog from './ProjectFormDialog';
+import ProjectGroup, { ConversationList } from './ProjectGroup';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -20,10 +22,12 @@ interface SidebarProps {
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
   isClearingAll: boolean;
-}
-
-function formatConversationTitle(title: string): string {
-  return title.length > 28 ? `${title.slice(0, 28)}...` : title;
+  projects: Project[];
+  activeProjectId: string | null;
+  onNewProject: (name: string) => void;
+  onNewProjectChat: (projectId: string) => void;
+  onRenameProject: (projectId: string, name: string) => void;
+  onArchiveProject: (projectId: string) => void;
 }
 
 function getUserLabel(email: string): string {
@@ -231,110 +235,6 @@ function ConversationMenu({
   );
 }
 
-function ConversationList({
-  conversations,
-  activeId,
-  openConversationMenuId,
-  editingConversationId,
-  editingTitle,
-  onSelect,
-  onToggleMenu,
-  onRename,
-  onTogglePin,
-  onDelete,
-  onEditingTitleChange,
-  onEditingSubmit,
-  onEditingCancel,
-}: {
-  conversations: Conversation[];
-  activeId: string | null;
-  openConversationMenuId: string | null;
-  editingConversationId: string | null;
-  editingTitle: string;
-  onSelect: (id: string) => void;
-  onToggleMenu: (id: string) => void;
-  onRename: (id: string, currentTitle: string) => void;
-  onTogglePin: (id: string, pinned: boolean) => void;
-  onDelete: (id: string) => void;
-  onEditingTitleChange: (value: string) => void;
-  onEditingSubmit: () => void;
-  onEditingCancel: () => void;
-}) {
-  if (conversations.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="shell-conversation-list">
-      {conversations.map((conversation) => {
-        const isActive = conversation.id === activeId;
-        const isEditing = conversation.id === editingConversationId;
-
-        return (
-          <div
-            key={conversation.id}
-            className={`shell-conversation-item ${isActive ? 'is-active' : ''}`}
-            onClick={() => onSelect(conversation.id)}
-          >
-            {isEditing ? (
-              <div className="shell-conversation-select">
-                <input
-                  type="text"
-                  className="shell-conversation-rename-input"
-                  value={editingTitle}
-                  autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
-                  onChange={(event) => onEditingTitleChange(event.target.value)}
-                  onClick={(event) => event.stopPropagation()}
-                  onBlur={onEditingSubmit}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      onEditingSubmit();
-                    }
-
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      onEditingCancel();
-                    }
-                  }}
-                />
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="shell-conversation-select"
-                onClick={() => onSelect(conversation.id)}
-              >
-                <span className="shell-conversation-title">
-                  {formatConversationTitle(conversation.title)}
-                </span>
-              </button>
-            )}
-
-            <span
-              className="shell-conversation-actions"
-              onClick={(event) => event.stopPropagation()}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <ConversationMenu
-                conversationId={conversation.id}
-                title={conversation.title}
-                pinned={conversation.pinned}
-                isOpen={openConversationMenuId === conversation.id}
-                onToggle={() => onToggleMenu(conversation.id)}
-                onRename={onRename}
-                onTogglePin={onTogglePin}
-                onDelete={onDelete}
-              />
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function Sidebar({
   conversations,
   activeId,
@@ -352,6 +252,12 @@ export default function Sidebar({
   isCollapsed,
   onToggleCollapsed,
   isClearingAll,
+  projects,
+  activeProjectId,
+  onNewProject,
+  onNewProjectChat,
+  onRenameProject,
+  onArchiveProject,
 }: SidebarProps) {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
@@ -360,6 +266,7 @@ export default function Sidebar({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isClearConfirming, setIsClearConfirming] = useState(false);
+  const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -415,13 +322,36 @@ export default function Sidebar({
     );
   }, [conversations, normalizedQuery]);
 
-  const primaryConversations = filteredConversations.slice(0, 6);
-  const recentConversations = filteredConversations.slice(6, 9);
+  const ordinaryConversations = useMemo(
+    () => filteredConversations.filter((conversation) => !conversation.project_id),
+    [filteredConversations]
+  );
+  const conversationsByProject = useMemo(() => {
+    const groups = new Map<string, Conversation[]>();
+    for (const project of projects) {
+      groups.set(project.id, []);
+    }
+    for (const conversation of filteredConversations) {
+      if (!conversation.project_id) {
+        continue;
+      }
+      groups.get(conversation.project_id)?.push(conversation);
+    }
+    return groups;
+  }, [filteredConversations, projects]);
+  const visibleProjects = useMemo(() => {
+    if (!normalizedQuery) {
+      return projects;
+    }
+
+    return projects.filter((project) => (conversationsByProject.get(project.id)?.length ?? 0) > 0);
+  }, [conversationsByProject, normalizedQuery, projects]);
   const compactConversationId =
     activeId ?? filteredConversations[0]?.id ?? conversations[0]?.id ?? null;
   const hasConversations = conversations.length > 0;
   const hasSearchQuery = normalizedQuery.length > 0;
   const showSearchResults = isSearchOpen && hasSearchQuery;
+  const showOrdinaryGroup = !showSearchResults || ordinaryConversations.length > 0;
   const searchResultCount = filteredConversations.length;
   const currentUserLabel = getUserLabel(currentUser.email);
   const currentUserInitials = getUserInitials(currentUser.email);
@@ -503,6 +433,21 @@ export default function Sidebar({
 
     onClearAll();
   };
+
+  const renderConversationActions = (conversation: Conversation) => (
+    <ConversationMenu
+      conversationId={conversation.id}
+      title={conversation.title}
+      pinned={conversation.pinned}
+      isOpen={openConversationMenuId === conversation.id}
+      onToggle={() =>
+        setOpenConversationMenuId((prev) => (prev === conversation.id ? null : conversation.id))
+      }
+      onRename={handleConversationRename}
+      onTogglePin={handleConversationPinToggle}
+      onDelete={handleConversationDelete}
+    />
+  );
 
   return (
     <aside
@@ -617,84 +562,86 @@ export default function Sidebar({
               )}
             </div>
 
-            {showSearchResults ? (
+            {showOrdinaryGroup ? (
               <>
+                <div className="shell-section-label">普通聊天</div>
                 <ConversationList
-                  conversations={filteredConversations}
+                  conversations={ordinaryConversations}
                   activeId={activeId}
-                  openConversationMenuId={openConversationMenuId}
                   editingConversationId={editingConversationId}
                   editingTitle={editingTitle}
                   onSelect={onSelect}
-                  onToggleMenu={(id) =>
-                    setOpenConversationMenuId((prev) => (prev === id ? null : id))
-                  }
-                  onRename={handleConversationRename}
-                  onTogglePin={handleConversationPinToggle}
-                  onDelete={handleConversationDelete}
                   onEditingTitleChange={setEditingTitle}
                   onEditingSubmit={handleRenameSubmit}
                   onEditingCancel={handleRenameCancel}
-                />
-                {filteredConversations.length === 0 ? (
-                  <div className="shell-search-empty">
-                    <strong>No conversations found</strong>
-                    <span>Try a different keyword or clear the search.</span>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <ConversationList
-                  conversations={primaryConversations}
-                  activeId={activeId}
-                  openConversationMenuId={openConversationMenuId}
-                  editingConversationId={editingConversationId}
-                  editingTitle={editingTitle}
-                  onSelect={onSelect}
-                  onToggleMenu={(id) =>
-                    setOpenConversationMenuId((prev) => (prev === id ? null : id))
-                  }
-                  onRename={handleConversationRename}
-                  onTogglePin={handleConversationPinToggle}
-                  onDelete={handleConversationDelete}
-                  onEditingTitleChange={setEditingTitle}
-                  onEditingSubmit={handleRenameSubmit}
-                  onEditingCancel={handleRenameCancel}
+                  renderActions={renderConversationActions}
                 />
 
-                {primaryConversations.length === 0 ? (
-                  <div className="shell-empty-history">Your recent chats will appear here.</div>
+                {ordinaryConversations.length === 0 ? (
+                  <div className="shell-empty-history">Your ordinary chats will appear here.</div>
                 ) : null}
 
                 <div className="shell-divider" />
+              </>
+            ) : null}
 
-                <div className="shell-section-label">Last 7 Days</div>
-                <ConversationList
-                  conversations={recentConversations}
+            <div className="shell-section-head shell-section-head--projects">
+              <span>Projects</span>
+              <button
+                type="button"
+                className="shell-project-add"
+                aria-label="Create project"
+                onClick={() => setIsProjectDialogOpen(true)}
+              >
+                +
+              </button>
+            </div>
+
+            <div className="shell-project-list">
+              {visibleProjects.map((project) => (
+                <ProjectGroup
+                  key={project.id}
+                  project={project}
+                  conversations={conversationsByProject.get(project.id) ?? []}
                   activeId={activeId}
-                  openConversationMenuId={openConversationMenuId}
+                  activeProjectId={activeProjectId}
+                  onNewChat={() => onNewProjectChat(project.id)}
+                  onRenameProject={onRenameProject}
+                  onArchiveProject={onArchiveProject}
                   editingConversationId={editingConversationId}
                   editingTitle={editingTitle}
                   onSelect={onSelect}
-                  onToggleMenu={(id) =>
-                    setOpenConversationMenuId((prev) => (prev === id ? null : id))
-                  }
-                  onRename={handleConversationRename}
-                  onTogglePin={handleConversationPinToggle}
-                  onDelete={handleConversationDelete}
                   onEditingTitleChange={setEditingTitle}
                   onEditingSubmit={handleRenameSubmit}
                   onEditingCancel={handleRenameCancel}
+                  renderActions={renderConversationActions}
                 />
+              ))}
+            </div>
 
-                {recentConversations.length === 0 ? (
-                  <div className="shell-muted-item">
-                    <span>More chats will show up here.</span>
-                  </div>
-                ) : null}
-              </>
-            )}
+            {showSearchResults && filteredConversations.length === 0 ? (
+              <div className="shell-search-empty">
+                <strong>No conversations found</strong>
+                <span>Try a different keyword or clear the search.</span>
+              </div>
+            ) : null}
+
+            {!showSearchResults && visibleProjects.length === 0 ? (
+              <div className="shell-muted-item">
+                <span>No projects yet.</span>
+              </div>
+            ) : null}
+
+            {isProjectDialogOpen ? (
+              <ProjectFormDialog
+                title="Create project"
+                onSubmit={(name) => {
+                  setIsProjectDialogOpen(false);
+                  onNewProject(name);
+                }}
+                onClose={() => setIsProjectDialogOpen(false)}
+              />
+            ) : null}
 
             <div className="shell-sidebar-spacer" />
 

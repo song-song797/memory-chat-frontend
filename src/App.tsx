@@ -742,15 +742,6 @@ export default function App() {
     },
     [activeProjectId, handleNewChat]
   );
-  const projectWorkspaceActions = useMemo(
-    () => ({
-      createProject: handleCreateProject,
-      updateProject: handleUpdateProject,
-      newProjectChat: handleNewProjectChat,
-    }),
-    [handleCreateProject, handleNewProjectChat, handleUpdateProject]
-  );
-  void projectWorkspaceActions;
 
   const handleSend = useCallback(
     async ({
@@ -906,6 +897,12 @@ export default function App() {
         isCollapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
         isClearingAll={isClearingConversations}
+        projects={projects}
+        activeProjectId={activeProjectId ?? null}
+        onNewProject={handleCreateProject}
+        onNewProjectChat={handleNewProjectChat}
+        onRenameProject={(projectId, name) => handleUpdateProject(projectId, { name })}
+        onArchiveProject={(projectId) => handleUpdateProject(projectId, { archived: true })}
       />
       <div className="mobile-topbar">
         <button
