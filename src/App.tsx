@@ -10,6 +10,7 @@ import * as api from './services/api';
 import type {
   ComposerAttachment,
   Conversation,
+  Memory,
   Message,
   ModelOption,
   ReasoningLevel,
@@ -103,6 +104,9 @@ export default function App() {
   const [streamingStartedAt, setStreamingStartedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memoryDraft, setMemoryDraft] = useState('');
+  const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isClearingConversations, setIsClearingConversations] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -120,6 +124,9 @@ export default function App() {
     setStreamingStartedAt(null);
     setErrorMessage('');
     setIsSettingsOpen(false);
+    setMemories([]);
+    setMemoryDraft('');
+    setIsMemoriesLoading(false);
     setIsMobileSidebarOpen(false);
   }, []);
 
@@ -249,6 +256,33 @@ export default function App() {
     setConversations(convs);
     setErrorMessage('');
   }, []);
+
+  const refreshMemories = useCallback(async () => {
+    setIsMemoriesLoading(true);
+    try {
+      const nextMemories = await api.fetchMemories();
+      setMemories(nextMemories);
+      setErrorMessage('');
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to fetch memories';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      setIsMemoriesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser || !isSettingsOpen) {
+      return;
+    }
+
+    void refreshMemories();
+  }, [currentUser, isSettingsOpen, refreshMemories]);
 
   const handleAuthSubmit = useCallback(
     async (mode: 'signup' | 'login', email: string, password: string) => {
@@ -420,6 +454,74 @@ export default function App() {
       setIsClearingConversations(false);
     }
   }, [isClearingConversations]);
+
+  const handleCreateMemory = useCallback(async () => {
+    const content = memoryDraft.trim();
+    if (!content) return;
+
+    try {
+      const memory = await api.createMemory(content);
+      setMemories((prev) => [memory, ...prev]);
+      setMemoryDraft('');
+      setErrorMessage('');
+      toast.success({
+        content: '记忆已添加',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to create memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    }
+  }, [memoryDraft]);
+
+  const handleToggleMemory = useCallback(async (memory: Memory) => {
+    try {
+      const updatedMemory = await api.updateMemory(memory.id, {
+        enabled: !memory.enabled,
+      });
+      setMemories((prev) =>
+        prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
+      );
+      setErrorMessage('');
+      toast.success({
+        content: updatedMemory.enabled ? '记忆已启用' : '记忆已停用',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to update memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    }
+  }, []);
+
+  const handleDeleteMemory = useCallback(async (memory: Memory) => {
+    try {
+      await api.deleteMemory(memory.id);
+      setMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      setErrorMessage('');
+      toast.success({
+        content: '记忆已删除',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to delete memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    }
+  }, []);
 
   const handleSend = useCallback(
     async ({
@@ -619,6 +721,13 @@ export default function App() {
         onModelChange={setSelectedModel}
         reasoningLevel={reasoningLevel}
         onReasoningLevelChange={setReasoningLevel}
+        memories={memories}
+        memoryDraft={memoryDraft}
+        isMemoriesLoading={isMemoriesLoading}
+        onMemoryDraftChange={setMemoryDraft}
+        onCreateMemory={handleCreateMemory}
+        onToggleMemory={handleToggleMemory}
+        onDeleteMemory={handleDeleteMemory}
         onClose={() => setIsSettingsOpen(false)}
       />
     </div>
