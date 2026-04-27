@@ -117,11 +117,13 @@ export default function App() {
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
   const memoryRequestSeqRef = useRef(0);
+  const memoryMutationSeqRef = useRef(0);
   const currentUserIdRef = useRef<string | null>(null);
   const isSettingsOpenRef = useRef(false);
 
   const resetChatState = useCallback(() => {
     memoryRequestSeqRef.current += 1;
+    memoryMutationSeqRef.current += 1;
     setConversations([]);
     setActiveConvId(null);
     setMessages([]);
@@ -498,10 +500,15 @@ export default function App() {
     const userId = activeUserId;
     if (!content || !userId || isMemoryMutating) return;
 
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq || currentUserIdRef.current !== userId;
+
     setIsMemoryMutating(true);
     try {
       const memory = await api.createMemory(content);
-      if (currentUserIdRef.current !== userId) return;
+      if (isStale()) return;
 
       setMemories((prev) => [memory, ...prev]);
       setMemoryDraft('');
@@ -511,6 +518,8 @@ export default function App() {
         placement: 'top',
       });
     } catch (err) {
+      if (isStale()) return;
+
       console.error(err);
       const nextError = err instanceof Error ? err.message : 'Failed to create memory';
       setErrorMessage(nextError);
@@ -519,7 +528,9 @@ export default function App() {
         placement: 'top',
       });
     } finally {
-      setIsMemoryMutating(false);
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
     }
   }, [activeUserId, isMemoryMutating, memoryDraft]);
 
@@ -527,12 +538,17 @@ export default function App() {
     const userId = activeUserId;
     if (!userId || isMemoryMutating) return;
 
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq || currentUserIdRef.current !== userId;
+
     setIsMemoryMutating(true);
     try {
       const updatedMemory = await api.updateMemory(memory.id, {
         enabled: !memory.enabled,
       });
-      if (currentUserIdRef.current !== userId) return;
+      if (isStale()) return;
 
       setMemories((prev) =>
         prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
@@ -543,6 +559,8 @@ export default function App() {
         placement: 'top',
       });
     } catch (err) {
+      if (isStale()) return;
+
       console.error(err);
       const nextError = err instanceof Error ? err.message : 'Failed to update memory';
       setErrorMessage(nextError);
@@ -551,7 +569,9 @@ export default function App() {
         placement: 'top',
       });
     } finally {
-      setIsMemoryMutating(false);
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
     }
   }, [activeUserId, isMemoryMutating]);
 
@@ -559,10 +579,15 @@ export default function App() {
     const userId = activeUserId;
     if (!userId || isMemoryMutating) return;
 
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq || currentUserIdRef.current !== userId;
+
     setIsMemoryMutating(true);
     try {
       await api.deleteMemory(memory.id);
-      if (currentUserIdRef.current !== userId) return;
+      if (isStale()) return;
 
       setMemories((prev) => prev.filter((item) => item.id !== memory.id));
       setErrorMessage('');
@@ -571,6 +596,8 @@ export default function App() {
         placement: 'top',
       });
     } catch (err) {
+      if (isStale()) return;
+
       console.error(err);
       const nextError = err instanceof Error ? err.message : 'Failed to delete memory';
       setErrorMessage(nextError);
@@ -579,7 +606,9 @@ export default function App() {
         placement: 'top',
       });
     } finally {
-      setIsMemoryMutating(false);
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
     }
   }, [activeUserId, isMemoryMutating]);
 
