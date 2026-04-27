@@ -19,6 +19,7 @@ export interface Conversation {
   id: string;
   title: string;
   pinned: boolean;
+  project_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,14 +34,32 @@ export interface User {
   created_at: string;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description?: string | null;
+  default_model?: string | null;
+  default_reasoning_level?: ReasoningLevel | null;
+  is_default: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Memory {
   id: string;
   content: string;
   kind: string;
+  scope?: 'global' | 'project';
+  project_id?: string | null;
+  status?: 'active' | 'archived';
+  importance?: number;
   enabled: boolean;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   last_used_at?: string | null;
+  superseded_by_id?: string | null;
 }
 
 export interface AuthResponse {

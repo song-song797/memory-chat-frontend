@@ -13,6 +13,7 @@ import type {
   Memory,
   Message,
   ModelOption,
+  Project,
   ReasoningLevel,
   User,
 } from './types';
@@ -94,6 +95,8 @@ export default function App() {
   const [authErrorMessage, setAuthErrorMessage] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
@@ -104,7 +107,8 @@ export default function App() {
   const [streamingStartedAt, setStreamingStartedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [globalMemories, setGlobalMemories] = useState<Memory[]>([]);
+  const [projectMemories, setProjectMemories] = useState<Memory[]>([]);
   const [memoryDraft, setMemoryDraft] = useState('');
   const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
   const [isMemoryMutating, setIsMemoryMutating] = useState(false);
@@ -121,10 +125,26 @@ export default function App() {
   const currentUserIdRef = useRef<string | null>(null);
   const isSettingsOpenRef = useRef(false);
 
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConvId) ?? null,
+    [activeConvId, conversations]
+  );
+  const activeProjectId = activeConversation?.project_id ?? draftProjectId;
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === activeProjectId) ?? null,
+    [activeProjectId, projects]
+  );
+  const memories = useMemo(
+    () => (activeProject ? [...projectMemories, ...globalMemories] : globalMemories),
+    [activeProject, globalMemories, projectMemories]
+  );
+
   const resetChatState = useCallback(() => {
     memoryRequestSeqRef.current += 1;
     memoryMutationSeqRef.current += 1;
     setConversations([]);
+    setProjects([]);
+    setDraftProjectId(null);
     setActiveConvId(null);
     setMessages([]);
     setStreamingContent('');
@@ -132,7 +152,8 @@ export default function App() {
     setStreamingStartedAt(null);
     setErrorMessage('');
     setIsSettingsOpen(false);
-    setMemories([]);
+    setGlobalMemories([]);
+    setProjectMemories([]);
     setMemoryDraft('');
     setIsMemoriesLoading(false);
     setIsMemoryMutating(false);
@@ -182,10 +203,10 @@ export default function App() {
       return;
     }
 
-    api
-      .fetchConversations()
-      .then((data) => {
-        setConversations(data);
+    Promise.all([api.fetchConversations(), api.fetchProjects()])
+      .then(([conversationData, projectData]) => {
+        setConversations(conversationData);
+        setProjects(projectData);
         setErrorMessage('');
       })
       .catch((err: Error) => {
@@ -296,10 +317,16 @@ export default function App() {
 
       setIsMemoriesLoading(true);
       try {
-        const nextMemories = await api.fetchMemories();
+        const [nextGlobalMemories, nextProjectMemories] = await Promise.all([
+          api.fetchMemories({ scope: 'global' }),
+          activeProjectId
+            ? api.fetchMemories({ scope: 'project', projectId: activeProjectId })
+            : Promise.resolve([]),
+        ]);
         if (isStale()) return;
 
-        setMemories(nextMemories);
+        setGlobalMemories(nextGlobalMemories);
+        setProjectMemories(nextProjectMemories);
         setErrorMessage('');
       } catch (err) {
         if (isStale()) return;
@@ -322,7 +349,7 @@ export default function App() {
       isActive = false;
       memoryRequestSeqRef.current += 1;
     };
-  }, [activeUserId, isSettingsOpen]);
+  }, [activeProjectId, activeUserId, isSettingsOpen]);
 
   const handleAuthSubmit = useCallback(
     async (mode: 'signup' | 'login', email: string, password: string) => {
@@ -379,6 +406,17 @@ export default function App() {
   const handleNewChat = useCallback(() => {
     setAppView('chat');
     setActiveConvId(null);
+    setDraftProjectId(null);
+    setMessages([]);
+    setStreamingContent('');
+    setErrorMessage('');
+    setIsMobileSidebarOpen(false);
+  }, []);
+
+  const handleNewProjectChat = useCallback((projectId: string) => {
+    setAppView('chat');
+    setActiveConvId(null);
+    setDraftProjectId(projectId);
     setMessages([]);
     setStreamingContent('');
     setErrorMessage('');
@@ -388,6 +426,7 @@ export default function App() {
   const handleSelectConversation = useCallback((id: string) => {
     setAppView('chat');
     setActiveConvId(id);
+    setDraftProjectId(null);
     setStreamingContent('');
     setErrorMessage('');
     setIsMobileSidebarOpen(false);
@@ -473,6 +512,7 @@ export default function App() {
       await api.clearAllConversations();
       setConversations([]);
       setActiveConvId(null);
+      setDraftProjectId(null);
       setMessages([]);
       setStreamingContent('');
       setErrorMessage('');
@@ -495,7 +535,7 @@ export default function App() {
     }
   }, [isClearingConversations]);
 
-  const handleCreateMemory = useCallback(async () => {
+  const handleCreateGlobalMemory = useCallback(async () => {
     const content = memoryDraft.trim();
     const userId = activeUserId;
     if (!content || !userId || isMemoryMutating) return;
@@ -507,10 +547,10 @@ export default function App() {
 
     setIsMemoryMutating(true);
     try {
-      const memory = await api.createMemory(content);
+      const memory = await api.createMemory({ content, scope: 'global' });
       if (isStale()) return;
 
-      setMemories((prev) => [memory, ...prev]);
+      setGlobalMemories((prev) => [memory, ...prev]);
       setMemoryDraft('');
       setErrorMessage('');
       toast.success({
@@ -534,9 +574,65 @@ export default function App() {
     }
   }, [activeUserId, isMemoryMutating, memoryDraft]);
 
+  const handleCreateProjectMemory = useCallback(async () => {
+    const content = memoryDraft.trim();
+    const userId = activeUserId;
+    const projectId = activeProjectId;
+    if (!content || !userId || !projectId || isMemoryMutating) return;
+
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq ||
+      currentUserIdRef.current !== userId ||
+      activeProjectId !== projectId;
+
+    setIsMemoryMutating(true);
+    try {
+      const memory = await api.createMemory({
+        content,
+        scope: 'project',
+        projectId,
+      });
+      if (isStale()) return;
+
+      setProjectMemories((prev) => [memory, ...prev]);
+      setMemoryDraft('');
+      setErrorMessage('');
+      toast.success({
+        content: '记忆已添加',
+        placement: 'top',
+      });
+    } catch (err) {
+      if (isStale()) return;
+
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to create memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
+    }
+  }, [activeProjectId, activeUserId, isMemoryMutating, memoryDraft]);
+
+  const handleCreateMemory = useCallback(() => {
+    if (activeProjectId) {
+      void handleCreateProjectMemory();
+      return;
+    }
+
+    void handleCreateGlobalMemory();
+  }, [activeProjectId, handleCreateGlobalMemory, handleCreateProjectMemory]);
+
   const handleToggleMemory = useCallback(async (memory: Memory) => {
     const userId = activeUserId;
     if (!userId || isMemoryMutating) return;
+    const isProjectMemory = memory.scope === 'project' || Boolean(memory.project_id);
 
     const mutationSeq = memoryMutationSeqRef.current + 1;
     memoryMutationSeqRef.current = mutationSeq;
@@ -550,9 +646,15 @@ export default function App() {
       });
       if (isStale()) return;
 
-      setMemories((prev) =>
-        prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
-      );
+      if (isProjectMemory) {
+        setProjectMemories((prev) =>
+          prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
+        );
+      } else {
+        setGlobalMemories((prev) =>
+          prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
+        );
+      }
       setErrorMessage('');
       toast.success({
         content: updatedMemory.enabled ? '记忆已启用' : '记忆已停用',
@@ -578,6 +680,7 @@ export default function App() {
   const handleDeleteMemory = useCallback(async (memory: Memory) => {
     const userId = activeUserId;
     if (!userId || isMemoryMutating) return;
+    const isProjectMemory = memory.scope === 'project' || Boolean(memory.project_id);
 
     const mutationSeq = memoryMutationSeqRef.current + 1;
     memoryMutationSeqRef.current = mutationSeq;
@@ -589,7 +692,11 @@ export default function App() {
       await api.deleteMemory(memory.id);
       if (isStale()) return;
 
-      setMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      if (isProjectMemory) {
+        setProjectMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      } else {
+        setGlobalMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      }
       setErrorMessage('');
       toast.success({
         content: '记忆已删除',
@@ -611,6 +718,39 @@ export default function App() {
       }
     }
   }, [activeUserId, isMemoryMutating]);
+
+  const handleCreateProject = useCallback(
+    async (name: string) => {
+      const project = await api.createProject({ name });
+      setProjects((prev) => [project, ...prev]);
+      handleNewProjectChat(project.id);
+    },
+    [handleNewProjectChat]
+  );
+
+  const handleUpdateProject = useCallback(
+    async (projectId: string, updates: { name?: string; archived?: boolean }) => {
+      const updatedProject = await api.updateProject(projectId, updates);
+      setProjects((prev) =>
+        updates.archived
+          ? prev.filter((project) => project.id !== projectId)
+          : prev.map((project) => (project.id === projectId ? updatedProject : project))
+      );
+      if (updates.archived && activeProjectId === projectId) {
+        handleNewChat();
+      }
+    },
+    [activeProjectId, handleNewChat]
+  );
+  const projectWorkspaceActions = useMemo(
+    () => ({
+      createProject: handleCreateProject,
+      updateProject: handleUpdateProject,
+      newProjectChat: handleNewProjectChat,
+    }),
+    [handleCreateProject, handleNewProjectChat, handleUpdateProject]
+  );
+  void projectWorkspaceActions;
 
   const handleSend = useCallback(
     async ({
@@ -650,6 +790,7 @@ export default function App() {
           message,
           attachments.map((attachment) => attachment.file),
           currentConvId,
+          activeProjectId ?? null,
           selectedModel || null,
           reasoningLevel,
           (chunk) => {
@@ -687,6 +828,7 @@ export default function App() {
               refreshConversations(),
             ]);
             setMessages(msgs);
+            setDraftProjectId(null);
           } catch (err) {
             console.error(err);
             setErrorMessage(
@@ -698,7 +840,7 @@ export default function App() {
         }
       }
     },
-    [activeConvId, isStreaming, reasoningLevel, refreshConversations, selectedModel]
+    [activeConvId, activeProjectId, isStreaming, reasoningLevel, refreshConversations, selectedModel]
   );
 
   const handleStopStreaming = useCallback(() => {

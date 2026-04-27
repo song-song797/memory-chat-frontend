@@ -6,6 +6,7 @@ import type {
   Memory,
   Message,
   ModelCatalog,
+  Project,
   ReasoningLevel,
   User,
 } from '../types';
@@ -159,6 +160,56 @@ export async function fetchModels(): Promise<ModelCatalog> {
   return res.json();
 }
 
+export async function fetchProjects(includeArchived = false): Promise<Project[]> {
+  const query = includeArchived ? '?include_archived=true' : '';
+  const res = await apiFetch(`${API_BASE}/projects${query}`);
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch projects');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function createProject(input: {
+  name: string;
+  description?: string | null;
+  default_model?: string | null;
+  default_reasoning_level?: ReasoningLevel | null;
+}): Promise<Project> {
+  const res = await apiFetch(`${API_BASE}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to create project');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function updateProject(
+  projectId: string,
+  updates: {
+    name?: string;
+    description?: string | null;
+    default_model?: string | null;
+    default_reasoning_level?: ReasoningLevel | null;
+    archived?: boolean;
+  }
+): Promise<Project> {
+  const res = await apiFetch(`${API_BASE}/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to update project');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
 export async function fetchMessages(conversationId: string): Promise<Message[]> {
   const res = await apiFetch(`${API_BASE}/conversations/${conversationId}/messages`);
   if (!res.ok) {
@@ -213,8 +264,18 @@ export async function updateConversation(
   return res.json();
 }
 
-export async function fetchMemories(): Promise<Memory[]> {
-  const res = await apiFetch(`${API_BASE}/memories`);
+export async function fetchMemories(options: {
+  scope?: 'global' | 'project';
+  projectId?: string | null;
+  includeArchived?: boolean;
+} = {}): Promise<Memory[]> {
+  const params = new URLSearchParams();
+  if (options.scope) params.set('scope', options.scope);
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.includeArchived) params.set('include_archived', 'true');
+  const query = params.toString() ? `?${params.toString()}` : '';
+
+  const res = await apiFetch(`${API_BASE}/memories${query}`);
   if (!res.ok) {
     const errorMessage = await getErrorMessage(res, 'Failed to fetch memories');
     throw new Error(errorMessage);
@@ -222,11 +283,36 @@ export async function fetchMemories(): Promise<Memory[]> {
   return res.json();
 }
 
-export async function createMemory(content: string, kind = 'fact'): Promise<Memory> {
+export async function createMemory(
+  input:
+    | string
+    | {
+        content: string;
+        kind?: string;
+        scope?: 'global' | 'project';
+        projectId?: string | null;
+      },
+  kind = 'fact'
+): Promise<Memory> {
+  const payload =
+    typeof input === 'string'
+      ? {
+          content: input,
+          kind,
+          scope: 'global',
+          project_id: null,
+        }
+      : {
+          content: input.content,
+          kind: input.kind ?? 'fact',
+          scope: input.scope ?? 'global',
+          project_id: input.projectId ?? null,
+        };
+
   const res = await apiFetch(`${API_BASE}/memories`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, kind }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const errorMessage = await getErrorMessage(res, 'Failed to create memory');
@@ -237,7 +323,7 @@ export async function createMemory(content: string, kind = 'fact'): Promise<Memo
 
 export async function updateMemory(
   memoryId: string,
-  updates: { content?: string; kind?: string; enabled?: boolean }
+  updates: { content?: string; kind?: string; enabled?: boolean; status?: 'active' | 'archived' }
 ): Promise<Memory> {
   const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, {
     method: 'PUT',
@@ -265,6 +351,7 @@ export async function sendMessage(
   message: string,
   attachments: File[],
   conversationId: string | null,
+  projectId: string | null,
   model: string | null,
   reasoningLevel: ReasoningLevel,
   onChunk: (content: string) => void,
@@ -277,6 +364,10 @@ export async function sendMessage(
 
   if (conversationId) {
     formData.append('conversation_id', conversationId);
+  }
+
+  if (projectId) {
+    formData.append('project_id', projectId);
   }
 
   if (model) {
