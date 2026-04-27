@@ -3,6 +3,7 @@ import type {
   AuthResponse,
   Conversation,
   LandingAgentMessage,
+  Memory,
   Message,
   ModelCatalog,
   ReasoningLevel,
@@ -210,6 +211,54 @@ export async function updateConversation(
     throw new Error(errorMessage);
   }
   return res.json();
+}
+
+export async function fetchMemories(): Promise<Memory[]> {
+  const res = await apiFetch(`${API_BASE}/memories`);
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch memories');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function createMemory(content: string, kind = 'fact'): Promise<Memory> {
+  const res = await apiFetch(`${API_BASE}/memories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, kind }),
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to create memory');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function updateMemory(
+  memoryId: string,
+  updates: { content?: string; kind?: string; enabled?: boolean }
+): Promise<Memory> {
+  const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to update memory');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function deleteMemory(memoryId: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to delete memory');
+    throw new Error(errorMessage);
+  }
 }
 
 export async function sendMessage(

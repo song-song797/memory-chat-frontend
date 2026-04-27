@@ -10,6 +10,7 @@ import * as api from './services/api';
 import type {
   ComposerAttachment,
   Conversation,
+  Memory,
   Message,
   ModelOption,
   ReasoningLevel,
@@ -103,15 +104,26 @@ export default function App() {
   const [streamingStartedAt, setStreamingStartedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memoryDraft, setMemoryDraft] = useState('');
+  const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
+  const [isMemoryMutating, setIsMemoryMutating] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isClearingConversations, setIsClearingConversations] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
   });
+  const activeUserId = currentUser?.id ?? null;
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
+  const memoryRequestSeqRef = useRef(0);
+  const memoryMutationSeqRef = useRef(0);
+  const currentUserIdRef = useRef<string | null>(null);
+  const isSettingsOpenRef = useRef(false);
 
   const resetChatState = useCallback(() => {
+    memoryRequestSeqRef.current += 1;
+    memoryMutationSeqRef.current += 1;
     setConversations([]);
     setActiveConvId(null);
     setMessages([]);
@@ -120,8 +132,20 @@ export default function App() {
     setStreamingStartedAt(null);
     setErrorMessage('');
     setIsSettingsOpen(false);
+    setMemories([]);
+    setMemoryDraft('');
+    setIsMemoriesLoading(false);
+    setIsMemoryMutating(false);
     setIsMobileSidebarOpen(false);
   }, []);
+
+  useEffect(() => {
+    currentUserIdRef.current = activeUserId;
+  }, [activeUserId]);
+
+  useEffect(() => {
+    isSettingsOpenRef.current = isSettingsOpen;
+  }, [isSettingsOpen]);
 
   useEffect(() => {
     const bootstrapAuth = async () => {
@@ -249,6 +273,56 @@ export default function App() {
     setConversations(convs);
     setErrorMessage('');
   }, []);
+
+  useEffect(() => {
+    if (!activeUserId || !isSettingsOpen) {
+      return;
+    }
+
+    const requestSeq = memoryRequestSeqRef.current + 1;
+    const userId = activeUserId;
+    let isActive = true;
+    memoryRequestSeqRef.current = requestSeq;
+
+    const isStale = () =>
+      !isActive ||
+      memoryRequestSeqRef.current !== requestSeq ||
+      currentUserIdRef.current !== userId ||
+      !isSettingsOpenRef.current;
+
+    void (async () => {
+      await Promise.resolve();
+      if (isStale()) return;
+
+      setIsMemoriesLoading(true);
+      try {
+        const nextMemories = await api.fetchMemories();
+        if (isStale()) return;
+
+        setMemories(nextMemories);
+        setErrorMessage('');
+      } catch (err) {
+        if (isStale()) return;
+
+        console.error(err);
+        const nextError = err instanceof Error ? err.message : 'Failed to fetch memories';
+        setErrorMessage(nextError);
+        toast.error({
+          content: nextError,
+          placement: 'top',
+        });
+      } finally {
+        if (!isStale()) {
+          setIsMemoriesLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+      memoryRequestSeqRef.current += 1;
+    };
+  }, [activeUserId, isSettingsOpen]);
 
   const handleAuthSubmit = useCallback(
     async (mode: 'signup' | 'login', email: string, password: string) => {
@@ -420,6 +494,123 @@ export default function App() {
       setIsClearingConversations(false);
     }
   }, [isClearingConversations]);
+
+  const handleCreateMemory = useCallback(async () => {
+    const content = memoryDraft.trim();
+    const userId = activeUserId;
+    if (!content || !userId || isMemoryMutating) return;
+
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq || currentUserIdRef.current !== userId;
+
+    setIsMemoryMutating(true);
+    try {
+      const memory = await api.createMemory(content);
+      if (isStale()) return;
+
+      setMemories((prev) => [memory, ...prev]);
+      setMemoryDraft('');
+      setErrorMessage('');
+      toast.success({
+        content: '记忆已添加',
+        placement: 'top',
+      });
+    } catch (err) {
+      if (isStale()) return;
+
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to create memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
+    }
+  }, [activeUserId, isMemoryMutating, memoryDraft]);
+
+  const handleToggleMemory = useCallback(async (memory: Memory) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq || currentUserIdRef.current !== userId;
+
+    setIsMemoryMutating(true);
+    try {
+      const updatedMemory = await api.updateMemory(memory.id, {
+        enabled: !memory.enabled,
+      });
+      if (isStale()) return;
+
+      setMemories((prev) =>
+        prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
+      );
+      setErrorMessage('');
+      toast.success({
+        content: updatedMemory.enabled ? '记忆已启用' : '记忆已停用',
+        placement: 'top',
+      });
+    } catch (err) {
+      if (isStale()) return;
+
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to update memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
+    }
+  }, [activeUserId, isMemoryMutating]);
+
+  const handleDeleteMemory = useCallback(async (memory: Memory) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq || currentUserIdRef.current !== userId;
+
+    setIsMemoryMutating(true);
+    try {
+      await api.deleteMemory(memory.id);
+      if (isStale()) return;
+
+      setMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      setErrorMessage('');
+      toast.success({
+        content: '记忆已删除',
+        placement: 'top',
+      });
+    } catch (err) {
+      if (isStale()) return;
+
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to delete memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
+    }
+  }, [activeUserId, isMemoryMutating]);
 
   const handleSend = useCallback(
     async ({
@@ -619,6 +810,14 @@ export default function App() {
         onModelChange={setSelectedModel}
         reasoningLevel={reasoningLevel}
         onReasoningLevelChange={setReasoningLevel}
+        memories={memories}
+        memoryDraft={memoryDraft}
+        isMemoriesLoading={isMemoriesLoading}
+        isMemoryMutating={isMemoryMutating}
+        onMemoryDraftChange={setMemoryDraft}
+        onCreateMemory={handleCreateMemory}
+        onToggleMemory={handleToggleMemory}
+        onDeleteMemory={handleDeleteMemory}
         onClose={() => setIsSettingsOpen(false)}
       />
     </div>

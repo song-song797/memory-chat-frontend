@@ -1,4 +1,5 @@
-import type { ModelOption, ReasoningLevel } from '../types';
+import MemorySettingsSection from './MemorySettingsSection';
+import type { Memory, ModelOption, ReasoningLevel } from '../types';
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -8,6 +9,14 @@ interface SettingsDrawerProps {
   onModelChange: (value: string) => void;
   reasoningLevel: ReasoningLevel;
   onReasoningLevelChange: (level: ReasoningLevel) => void;
+  memories: Memory[];
+  memoryDraft: string;
+  isMemoriesLoading: boolean;
+  isMemoryMutating: boolean;
+  onMemoryDraftChange: (value: string) => void;
+  onCreateMemory: () => void;
+  onToggleMemory: (memory: Memory) => void;
+  onDeleteMemory: (memory: Memory) => void;
   onClose: () => void;
 }
 
@@ -71,6 +80,14 @@ export default function SettingsDrawer({
   onModelChange,
   reasoningLevel,
   onReasoningLevelChange,
+  memories,
+  memoryDraft,
+  isMemoriesLoading,
+  isMemoryMutating,
+  onMemoryDraftChange,
+  onCreateMemory,
+  onToggleMemory,
+  onDeleteMemory,
   onClose,
 }: SettingsDrawerProps) {
   const reasoningOptions = getReasoningOptions(selectedOption);
@@ -136,6 +153,17 @@ export default function SettingsDrawer({
           )}
           <p className="settings-hint">{getReasoningHint(selectedOption)}</p>
         </section>
+
+        <MemorySettingsSection
+          memories={memories}
+          draft={memoryDraft}
+          isLoading={isMemoriesLoading}
+          isMutating={isMemoryMutating}
+          onDraftChange={onMemoryDraftChange}
+          onCreate={onCreateMemory}
+          onToggle={onToggleMemory}
+          onDelete={onDeleteMemory}
+        />
       </aside>
     </div>
   );
