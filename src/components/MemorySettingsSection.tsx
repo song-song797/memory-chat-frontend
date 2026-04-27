@@ -1,8 +1,13 @@
 import type { Memory } from '../types';
 
 interface MemorySettingsSectionProps {
+  title: string;
+  countLabel: string;
   memories: Memory[];
   draft: string;
+  placeholder: string;
+  addLabel: string;
+  emptyLabel: string;
   isLoading: boolean;
   isMutating: boolean;
   onDraftChange: (value: string) => void;
@@ -25,8 +30,13 @@ function getKindLabel(kind: string): string {
 }
 
 export default function MemorySettingsSection({
+  title,
+  countLabel,
   memories,
   draft,
+  placeholder,
+  addLabel,
+  emptyLabel,
   isLoading,
   isMutating,
   onDraftChange,
@@ -37,24 +47,24 @@ export default function MemorySettingsSection({
   return (
     <section className="settings-section">
       <div className="settings-section-head">
-        <h3>长期记忆</h3>
-        <span>{isLoading ? '加载中' : `已保存 ${memories.length} 条`}</span>
+        <h3>{title}</h3>
+        <span>{isLoading ? '加载中' : countLabel}</span>
       </div>
 
       <div className="memory-create-row">
         <input
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
-          placeholder="添加一条记忆"
-          aria-label="添加一条记忆"
+          placeholder={placeholder}
+          aria-label={placeholder}
         />
         <button type="button" onClick={onCreate} disabled={!draft.trim() || isLoading || isMutating}>
-          添加
+          {addLabel}
         </button>
       </div>
 
       {memories.length === 0 ? (
-        <div className="settings-empty">还没有保存的记忆。</div>
+        <div className="settings-empty">{emptyLabel}</div>
       ) : (
         <div className="memory-list">
           {memories.map((memory) => (

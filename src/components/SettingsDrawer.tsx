@@ -9,12 +9,17 @@ interface SettingsDrawerProps {
   onModelChange: (value: string) => void;
   reasoningLevel: ReasoningLevel;
   onReasoningLevelChange: (level: ReasoningLevel) => void;
-  memories: Memory[];
-  memoryDraft: string;
+  activeProjectName: string | null;
+  globalMemories: Memory[];
+  projectMemories: Memory[];
+  globalMemoryDraft: string;
+  projectMemoryDraft: string;
   isMemoriesLoading: boolean;
   isMemoryMutating: boolean;
-  onMemoryDraftChange: (value: string) => void;
-  onCreateMemory: () => void;
+  onGlobalMemoryDraftChange: (value: string) => void;
+  onProjectMemoryDraftChange: (value: string) => void;
+  onCreateGlobalMemory: () => void;
+  onCreateProjectMemory: () => void;
   onToggleMemory: (memory: Memory) => void;
   onDeleteMemory: (memory: Memory) => void;
   onClose: () => void;
@@ -80,12 +85,17 @@ export default function SettingsDrawer({
   onModelChange,
   reasoningLevel,
   onReasoningLevelChange,
-  memories,
-  memoryDraft,
+  activeProjectName,
+  globalMemories,
+  projectMemories,
+  globalMemoryDraft,
+  projectMemoryDraft,
   isMemoriesLoading,
   isMemoryMutating,
-  onMemoryDraftChange,
-  onCreateMemory,
+  onGlobalMemoryDraftChange,
+  onProjectMemoryDraftChange,
+  onCreateGlobalMemory,
+  onCreateProjectMemory,
   onToggleMemory,
   onDeleteMemory,
   onClose,
@@ -154,13 +164,36 @@ export default function SettingsDrawer({
           <p className="settings-hint">{getReasoningHint(selectedOption)}</p>
         </section>
 
+        {activeProjectName ? (
+          <MemorySettingsSection
+            title={`${activeProjectName} 记忆`}
+            countLabel={`已保存 ${projectMemories.length} 条`}
+            memories={projectMemories}
+            draft={projectMemoryDraft}
+            placeholder="添加项目记忆"
+            addLabel="添加"
+            emptyLabel="这个项目还没有记忆。"
+            isLoading={isMemoriesLoading}
+            isMutating={isMemoryMutating}
+            onDraftChange={onProjectMemoryDraftChange}
+            onCreate={onCreateProjectMemory}
+            onToggle={onToggleMemory}
+            onDelete={onDeleteMemory}
+          />
+        ) : null}
+
         <MemorySettingsSection
-          memories={memories}
-          draft={memoryDraft}
+          title="全局记忆"
+          countLabel={`已保存 ${globalMemories.length} 条`}
+          memories={globalMemories}
+          draft={globalMemoryDraft}
+          placeholder="添加全局偏好"
+          addLabel="添加"
+          emptyLabel="还没有全局记忆。"
           isLoading={isMemoriesLoading}
           isMutating={isMemoryMutating}
-          onDraftChange={onMemoryDraftChange}
-          onCreate={onCreateMemory}
+          onDraftChange={onGlobalMemoryDraftChange}
+          onCreate={onCreateGlobalMemory}
           onToggle={onToggleMemory}
           onDelete={onDeleteMemory}
         />

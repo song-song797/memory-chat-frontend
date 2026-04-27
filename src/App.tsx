@@ -109,7 +109,8 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [globalMemories, setGlobalMemories] = useState<Memory[]>([]);
   const [projectMemories, setProjectMemories] = useState<Memory[]>([]);
-  const [memoryDraft, setMemoryDraft] = useState('');
+  const [globalMemoryDraft, setGlobalMemoryDraft] = useState('');
+  const [projectMemoryDrafts, setProjectMemoryDrafts] = useState<Record<string, string>>({});
   const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
   const [isMemoryMutating, setIsMemoryMutating] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -134,10 +135,7 @@ export default function App() {
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects]
   );
-  const memories = useMemo(
-    () => (activeProject ? [...projectMemories, ...globalMemories] : globalMemories),
-    [activeProject, globalMemories, projectMemories]
-  );
+  const projectMemoryDraft = activeProjectId ? projectMemoryDrafts[activeProjectId] ?? '' : '';
 
   const resetChatState = useCallback(() => {
     memoryRequestSeqRef.current += 1;
@@ -154,7 +152,8 @@ export default function App() {
     setIsSettingsOpen(false);
     setGlobalMemories([]);
     setProjectMemories([]);
-    setMemoryDraft('');
+    setGlobalMemoryDraft('');
+    setProjectMemoryDrafts({});
     setIsMemoriesLoading(false);
     setIsMemoryMutating(false);
     setIsMobileSidebarOpen(false);
@@ -536,7 +535,7 @@ export default function App() {
   }, [isClearingConversations]);
 
   const handleCreateGlobalMemory = useCallback(async () => {
-    const content = memoryDraft.trim();
+    const content = globalMemoryDraft.trim();
     const userId = activeUserId;
     if (!content || !userId || isMemoryMutating) return;
 
@@ -551,7 +550,7 @@ export default function App() {
       if (isStale()) return;
 
       setGlobalMemories((prev) => [memory, ...prev]);
-      setMemoryDraft('');
+      setGlobalMemoryDraft('');
       setErrorMessage('');
       toast.success({
         content: '记忆已添加',
@@ -572,10 +571,10 @@ export default function App() {
         setIsMemoryMutating(false);
       }
     }
-  }, [activeUserId, isMemoryMutating, memoryDraft]);
+  }, [activeUserId, globalMemoryDraft, isMemoryMutating]);
 
   const handleCreateProjectMemory = useCallback(async () => {
-    const content = memoryDraft.trim();
+    const content = projectMemoryDraft.trim();
     const userId = activeUserId;
     const projectId = activeProjectId;
     if (!content || !userId || !projectId || isMemoryMutating) return;
@@ -597,7 +596,11 @@ export default function App() {
       if (isStale()) return;
 
       setProjectMemories((prev) => [memory, ...prev]);
-      setMemoryDraft('');
+      setProjectMemoryDrafts((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
       setErrorMessage('');
       toast.success({
         content: '记忆已添加',
@@ -618,16 +621,17 @@ export default function App() {
         setIsMemoryMutating(false);
       }
     }
-  }, [activeProjectId, activeUserId, isMemoryMutating, memoryDraft]);
+  }, [activeProjectId, activeUserId, isMemoryMutating, projectMemoryDraft]);
 
-  const handleCreateMemory = useCallback(() => {
-    if (activeProjectId) {
-      void handleCreateProjectMemory();
-      return;
-    }
+  const handleProjectMemoryDraftChange = useCallback((value: string) => {
+    const projectId = activeProjectId;
+    if (!projectId) return;
 
-    void handleCreateGlobalMemory();
-  }, [activeProjectId, handleCreateGlobalMemory, handleCreateProjectMemory]);
+    setProjectMemoryDrafts((prev) => ({
+      ...prev,
+      [projectId]: value,
+    }));
+  }, [activeProjectId]);
 
   const handleToggleMemory = useCallback(async (memory: Memory) => {
     const userId = activeUserId;
@@ -949,12 +953,17 @@ export default function App() {
         onModelChange={setSelectedModel}
         reasoningLevel={reasoningLevel}
         onReasoningLevelChange={setReasoningLevel}
-        memories={memories}
-        memoryDraft={memoryDraft}
+        activeProjectName={activeProject?.name ?? null}
+        globalMemories={globalMemories}
+        projectMemories={projectMemories}
+        globalMemoryDraft={globalMemoryDraft}
+        projectMemoryDraft={projectMemoryDraft}
         isMemoriesLoading={isMemoriesLoading}
         isMemoryMutating={isMemoryMutating}
-        onMemoryDraftChange={setMemoryDraft}
-        onCreateMemory={handleCreateMemory}
+        onGlobalMemoryDraftChange={setGlobalMemoryDraft}
+        onProjectMemoryDraftChange={handleProjectMemoryDraftChange}
+        onCreateGlobalMemory={handleCreateGlobalMemory}
+        onCreateProjectMemory={handleCreateProjectMemory}
         onToggleMemory={handleToggleMemory}
         onDeleteMemory={handleDeleteMemory}
         onClose={() => setIsSettingsOpen(false)}
