@@ -115,19 +115,37 @@ export default function ProjectGroup({
   ...conversationListProps
 }: ProjectGroupProps) {
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const isActive = activeProjectId === project.id;
 
   return (
-    <div className={`shell-project-group ${isActive ? 'is-active' : ''}`}>
+    <div
+      className={`shell-project-group ${isActive ? 'is-active' : ''} ${
+        isExpanded ? 'is-expanded' : 'is-collapsed'
+      }`}
+    >
       <div className="shell-project-header">
         <button
           type="button"
+          className="shell-project-disclosure"
+          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
+          aria-expanded={isExpanded}
+          onClick={() => setIsExpanded((current) => !current)}
+        >
+          <Icon name={isExpanded ? 'arrow-down' : 'arrow-right'} />
+        </button>
+        <button
+          type="button"
           className="shell-project-title"
-          onClick={onNewChat}
+          onClick={() => {
+            setIsExpanded(true);
+            onNewChat();
+          }}
           aria-label={`Start new chat in ${project.name}`}
         >
           <span>{project.name}</span>
         </button>
+        <span className="shell-project-count">{conversations.length}</span>
         <div className="shell-project-actions">
           <button
             type="button"
@@ -156,10 +174,14 @@ export default function ProjectGroup({
         </div>
       </div>
 
-      <ConversationList conversations={conversations} {...conversationListProps} />
+      {isExpanded ? (
+        <div className="shell-project-children">
+          <ConversationList conversations={conversations} {...conversationListProps} />
 
-      {conversations.length === 0 ? (
-        <div className="shell-project-empty">No chats in this project yet.</div>
+          {conversations.length === 0 ? (
+            <div className="shell-project-empty">No chats in this project yet.</div>
+          ) : null}
+        </div>
       ) : null}
 
       {isRenameDialogOpen ? (

@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import './App.css';
 import ChatWindow from './components/ChatWindow';
 import Icon from './components/Icons';
-import SettingsDrawer from './components/SettingsDrawer';
+import AccountSettingsPanel from './components/settings/AccountSettingsPanel';
+import DataSettingsPanel from './components/settings/DataSettingsPanel';
+import GeneralSettingsPanel, {
+  type SettingsTheme,
+} from './components/settings/GeneralSettingsPanel';
+import MemorySettingsPanel from './components/settings/MemorySettingsPanel';
+import SettingsCenter, { type SettingsSectionId } from './components/settings/SettingsCenter';
 import Sidebar from './components/Sidebar';
 import SignUpScreen from './components/SignUpScreen';
 import { message as toast } from './services/message';
@@ -11,6 +18,9 @@ import type {
   ComposerAttachment,
   Conversation,
   Memory,
+  MemoryCandidate,
+  MemoryDocument,
+  MemoryScope,
   Message,
   ModelOption,
   Project,
@@ -23,9 +33,11 @@ const REASONING_STORAGE_KEY = 'memory-chat:reasoning-level';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'memory-chat:sidebar-collapsed';
 const VIEW_STORAGE_KEY = 'memory-chat:active-view';
 const AUTH_TOKEN_STORAGE_KEY = 'memory-chat:auth-token';
+const SETTINGS_SECTION_STORAGE_KEY = 'memory-chat:settings-section';
+const THEME_STORAGE_KEY = 'memory-chat:theme';
+const INLINE_CANDIDATE_POLL_DELAYS = [1000, 3000, 6000, 10000] as const;
 
 type AppView = 'signup' | 'chat';
-type ChatTheme = 'rose' | 'butter' | 'mist' | 'mint' | 'neutral';
 
 function getDefaultReasoningLevel(option?: ModelOption | null): ReasoningLevel {
   switch (option?.reasoning_mode) {
@@ -58,8 +70,17 @@ function normalizeReasoningLevel(
   }
 }
 
-function getConversationTheme(_conversationId: string | null): ChatTheme {
-  return 'neutral';
+function normalizeTheme(value: string | null): SettingsTheme {
+  switch (value) {
+    case 'rose':
+    case 'butter':
+    case 'mist':
+    case 'mint':
+    case 'neutral':
+      return value;
+    default:
+      return 'neutral';
+  }
 }
 
 function toTempMessageAttachments(attachments: ComposerAttachment[]) {
@@ -85,6 +106,17 @@ function revokeAttachmentUrls(attachments: Message['attachments'] | undefined) {
   });
 }
 
+function getMemoryScope(memory: Memory): MemoryScope {
+  if (memory.scope) return memory.scope;
+  if (memory.conversation_id) return 'conversation';
+  if (memory.project_id) return 'project';
+  return 'global';
+}
+
+function dedupeMemoryCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
+  return Array.from(new Map(candidates.map((candidate) => [candidate.id, candidate])).values());
+}
+
 export default function App() {
   const [appView, setAppView] = useState<AppView>(() => {
     const storedView = window.localStorage.getItem(VIEW_STORAGE_KEY);
@@ -106,11 +138,33 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingStartedAt, setStreamingStartedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsCenterOpen, setIsSettingsCenterOpen] = useState(false);
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(() => {
+    const storedSection = window.localStorage.getItem(SETTINGS_SECTION_STORAGE_KEY);
+    if (
+      storedSection === 'memory' ||
+      storedSection === 'data' ||
+      storedSection === 'account'
+    ) {
+      return storedSection;
+    }
+    return 'general';
+  });
+  const [selectedTheme, setSelectedTheme] = useState<SettingsTheme>(() =>
+    normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY))
+  );
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [globalMemories, setGlobalMemories] = useState<Memory[]>([]);
   const [projectMemories, setProjectMemories] = useState<Memory[]>([]);
+  const [conversationMemories, setConversationMemories] = useState<Memory[]>([]);
+  const [globalMemoryDocument, setGlobalMemoryDocument] = useState<MemoryDocument | null>(null);
+  const [projectMemoryDocument, setProjectMemoryDocument] = useState<MemoryDocument | null>(null);
+  const [conversationMemoryDocument, setConversationMemoryDocument] = useState<MemoryDocument | null>(null);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
+  const [inlineCandidate, setInlineCandidate] = useState<MemoryCandidate | null>(null);
   const [globalMemoryDraft, setGlobalMemoryDraft] = useState('');
   const [projectMemoryDrafts, setProjectMemoryDrafts] = useState<Record<string, string>>({});
+  const [conversationMemoryDrafts, setConversationMemoryDrafts] = useState<Record<string, string>>({});
   const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
   const [isMemoryMutating, setIsMemoryMutating] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -119,12 +173,23 @@ export default function App() {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
   });
   const activeUserId = currentUser?.id ?? null;
+  const isMemorySettingsVisible = isSettingsCenterOpen && activeSettingsSection === 'memory';
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
   const memoryRequestSeqRef = useRef(0);
   const memoryMutationSeqRef = useRef(0);
+  const inlineCandidateRequestSeqRef = useRef(0);
+  const inlineCandidatePollTimersRef = useRef<number[]>([]);
   const currentUserIdRef = useRef<string | null>(null);
-  const isSettingsOpenRef = useRef(false);
+  const activeConvIdRef = useRef<string | null>(null);
+  const isMemorySettingsVisibleRef = useRef(false);
+
+  const clearInlineCandidatePolls = useCallback(() => {
+    inlineCandidatePollTimersRef.current.forEach((timerId) => {
+      window.clearTimeout(timerId);
+    });
+    inlineCandidatePollTimersRef.current = [];
+  }, []);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConvId) ?? null,
@@ -135,11 +200,21 @@ export default function App() {
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects]
   );
+  const activeProjectConversations = useMemo(
+    () =>
+      activeProjectId
+        ? conversations.filter((conversation) => conversation.project_id === activeProjectId)
+        : [],
+    [activeProjectId, conversations]
+  );
   const projectMemoryDraft = activeProjectId ? projectMemoryDrafts[activeProjectId] ?? '' : '';
+  const conversationMemoryDraft = activeConvId ? conversationMemoryDrafts[activeConvId] ?? '' : '';
 
   const resetChatState = useCallback(() => {
     memoryRequestSeqRef.current += 1;
     memoryMutationSeqRef.current += 1;
+    inlineCandidateRequestSeqRef.current += 1;
+    clearInlineCandidatePolls();
     setConversations([]);
     setProjects([]);
     setDraftProjectId(null);
@@ -149,23 +224,47 @@ export default function App() {
     setIsStreaming(false);
     setStreamingStartedAt(null);
     setErrorMessage('');
-    setIsSettingsOpen(false);
+    setIsSettingsCenterOpen(false);
+    setIsModelPickerOpen(false);
     setGlobalMemories([]);
     setProjectMemories([]);
+    setConversationMemories([]);
+    setGlobalMemoryDocument(null);
+    setProjectMemoryDocument(null);
+    setConversationMemoryDocument(null);
+    setMemoryCandidates([]);
+    setInlineCandidate(null);
     setGlobalMemoryDraft('');
     setProjectMemoryDrafts({});
+    setConversationMemoryDrafts({});
     setIsMemoriesLoading(false);
     setIsMemoryMutating(false);
     setIsMobileSidebarOpen(false);
-  }, []);
+  }, [clearInlineCandidatePolls]);
 
   useEffect(() => {
     currentUserIdRef.current = activeUserId;
   }, [activeUserId]);
 
   useEffect(() => {
-    isSettingsOpenRef.current = isSettingsOpen;
-  }, [isSettingsOpen]);
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
+
+  useEffect(() => {
+    isMemorySettingsVisibleRef.current = isMemorySettingsVisible;
+    if (!isMemorySettingsVisible) {
+      memoryRequestSeqRef.current += 1;
+      setIsMemoriesLoading(false);
+    }
+  }, [isMemorySettingsVisible]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSettingsSection);
+  }, [activeSettingsSection]);
+
+  useEffect(() => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, selectedTheme);
+  }, [selectedTheme]);
 
   useEffect(() => {
     const bootstrapAuth = async () => {
@@ -270,9 +369,84 @@ export default function App() {
     setReasoningLevel((prev) => normalizeReasoningLevel(prev, selectedOption));
   }, [selectedModel, modelOptions]);
 
+  const loadInlineCandidate = useCallback(async (conversationId: string | null, projectId: string | null) => {
+    const userId = currentUserIdRef.current;
+    if (!userId || !conversationId) {
+      setInlineCandidate(null);
+      return;
+    }
+
+    const requestSeq = inlineCandidateRequestSeqRef.current + 1;
+    inlineCandidateRequestSeqRef.current = requestSeq;
+    const isStale = () =>
+      inlineCandidateRequestSeqRef.current !== requestSeq ||
+      currentUserIdRef.current !== userId ||
+      activeConvIdRef.current !== conversationId;
+
+    try {
+      const requests: Array<Promise<MemoryCandidate[]>> = [
+        api.fetchMemoryCandidates({ status: 'pending', surface: 'inline', scope: 'global' }),
+      ];
+      if (projectId) {
+        requests.push(
+          api.fetchMemoryCandidates({
+            status: 'pending',
+            surface: 'inline',
+            scope: 'project',
+            projectId,
+          })
+        );
+      }
+      requests.push(
+        api.fetchMemoryCandidates({
+          status: 'pending',
+          surface: 'inline',
+          scope: 'conversation',
+          conversationId,
+        })
+      );
+
+      const results = await Promise.all(requests);
+      if (isStale()) return;
+
+      setInlineCandidate(dedupeMemoryCandidates(results.flat())[0] ?? null);
+    } catch (err) {
+      if (isStale()) return;
+
+      console.error(err);
+      setInlineCandidate(null);
+    }
+  }, []);
+
+  const scheduleInlineCandidatePolls = useCallback(
+    (conversationId: string, projectId: string | null) => {
+      clearInlineCandidatePolls();
+
+      INLINE_CANDIDATE_POLL_DELAYS.forEach((delay) => {
+        const timerId = window.setTimeout(() => {
+          inlineCandidatePollTimersRef.current = inlineCandidatePollTimersRef.current.filter(
+            (currentTimerId) => currentTimerId !== timerId
+          );
+          void loadInlineCandidate(conversationId, projectId);
+        }, delay);
+
+        inlineCandidatePollTimersRef.current.push(timerId);
+      });
+    },
+    [clearInlineCandidatePolls, loadInlineCandidate]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearInlineCandidatePolls();
+    };
+  }, [clearInlineCandidatePolls]);
+
   useEffect(() => {
     if (!currentUser || !activeConvId) {
+      clearInlineCandidatePolls();
       setMessages([]);
+      setInlineCandidate(null);
       return;
     }
 
@@ -281,12 +455,13 @@ export default function App() {
       .then((data) => {
         setMessages(data);
         setErrorMessage('');
+        void loadInlineCandidate(activeConvId, activeProjectId ?? null);
       })
       .catch((err: Error) => {
         console.error(err);
         setErrorMessage(err.message);
       });
-  }, [activeConvId, currentUser]);
+  }, [activeConvId, activeProjectId, clearInlineCandidatePolls, currentUser, loadInlineCandidate]);
 
   const refreshConversations = useCallback(async () => {
     const convs = await api.fetchConversations();
@@ -295,7 +470,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeUserId || !isSettingsOpen) {
+    if (!activeUserId || !isMemorySettingsVisible) {
       return;
     }
 
@@ -308,7 +483,7 @@ export default function App() {
       !isActive ||
       memoryRequestSeqRef.current !== requestSeq ||
       currentUserIdRef.current !== userId ||
-      !isSettingsOpenRef.current;
+      !isMemorySettingsVisibleRef.current;
 
     void (async () => {
       await Promise.resolve();
@@ -316,16 +491,64 @@ export default function App() {
 
       setIsMemoriesLoading(true);
       try {
-        const [nextGlobalMemories, nextProjectMemories] = await Promise.all([
+        const candidateRequests: Array<Promise<MemoryCandidate[]>> = [
+          api.fetchMemoryCandidates({ status: 'pending', surface: 'settings', scope: 'global' }),
+        ];
+        if (activeProjectId) {
+          candidateRequests.push(
+            api.fetchMemoryCandidates({
+              status: 'pending',
+              surface: 'settings',
+              scope: 'project',
+              projectId: activeProjectId,
+            })
+          );
+        }
+        if (activeConvId) {
+          candidateRequests.push(
+            api.fetchMemoryCandidates({
+              status: 'pending',
+              surface: 'settings',
+              scope: 'conversation',
+              conversationId: activeConvId,
+            })
+          );
+        }
+
+        const [
+          nextGlobalMemories,
+          nextProjectMemories,
+          nextConversationMemories,
+          nextGlobalDocuments,
+          nextProjectDocuments,
+          nextConversationDocuments,
+          nextCandidateGroups,
+        ] = await Promise.all([
           api.fetchMemories({ scope: 'global' }),
           activeProjectId
             ? api.fetchMemories({ scope: 'project', projectId: activeProjectId })
             : Promise.resolve([]),
+          activeConvId
+            ? api.fetchMemories({ scope: 'conversation', conversationId: activeConvId })
+            : Promise.resolve([]),
+          api.fetchMemoryDocuments({ scope: 'global' }),
+          activeProjectId
+            ? api.fetchMemoryDocuments({ scope: 'project', projectId: activeProjectId })
+            : Promise.resolve([]),
+          activeConvId
+            ? api.fetchMemoryDocuments({ scope: 'conversation', conversationId: activeConvId })
+            : Promise.resolve([]),
+          Promise.all(candidateRequests),
         ]);
         if (isStale()) return;
 
         setGlobalMemories(nextGlobalMemories);
         setProjectMemories(nextProjectMemories);
+        setConversationMemories(nextConversationMemories);
+        setGlobalMemoryDocument(nextGlobalDocuments[0] ?? null);
+        setProjectMemoryDocument(nextProjectDocuments[0] ?? null);
+        setConversationMemoryDocument(nextConversationDocuments[0] ?? null);
+        setMemoryCandidates(dedupeMemoryCandidates(nextCandidateGroups.flat()));
         setErrorMessage('');
       } catch (err) {
         if (isStale()) return;
@@ -348,7 +571,7 @@ export default function App() {
       isActive = false;
       memoryRequestSeqRef.current += 1;
     };
-  }, [activeProjectId, activeUserId, isSettingsOpen]);
+  }, [activeConvId, activeProjectId, activeUserId, isMemorySettingsVisible]);
 
   const handleAuthSubmit = useCallback(
     async (mode: 'signup' | 'login', email: string, password: string) => {
@@ -403,41 +626,56 @@ export default function App() {
   }, [resetChatState]);
 
   const handleNewChat = useCallback(() => {
+    inlineCandidateRequestSeqRef.current += 1;
+    clearInlineCandidatePolls();
     setAppView('chat');
     setActiveConvId(null);
     setDraftProjectId(null);
     setMessages([]);
     setStreamingContent('');
+    setIsModelPickerOpen(false);
+    setInlineCandidate(null);
     setErrorMessage('');
     setIsMobileSidebarOpen(false);
-  }, []);
+  }, [clearInlineCandidatePolls]);
 
   const handleNewProjectChat = useCallback((projectId: string) => {
+    inlineCandidateRequestSeqRef.current += 1;
+    clearInlineCandidatePolls();
     setAppView('chat');
     setActiveConvId(null);
     setDraftProjectId(projectId);
     setMessages([]);
     setStreamingContent('');
+    setIsModelPickerOpen(false);
+    setInlineCandidate(null);
     setErrorMessage('');
     setIsMobileSidebarOpen(false);
-  }, []);
+  }, [clearInlineCandidatePolls]);
 
   const handleSelectConversation = useCallback((id: string) => {
+    inlineCandidateRequestSeqRef.current += 1;
+    clearInlineCandidatePolls();
     setAppView('chat');
     setActiveConvId(id);
     setDraftProjectId(null);
     setStreamingContent('');
+    setIsModelPickerOpen(false);
+    setInlineCandidate(null);
     setErrorMessage('');
     setIsMobileSidebarOpen(false);
-  }, []);
+  }, [clearInlineCandidatePolls]);
 
   const handleDeleteConversation = useCallback(
     async (id: string) => {
       try {
         await api.deleteConversation(id);
         if (activeConvId === id) {
+          inlineCandidateRequestSeqRef.current += 1;
+          clearInlineCandidatePolls();
           setActiveConvId(null);
           setMessages([]);
+          setInlineCandidate(null);
         }
         setIsMobileSidebarOpen(false);
         await refreshConversations();
@@ -446,7 +684,7 @@ export default function App() {
         setErrorMessage(err instanceof Error ? err.message : 'Failed to delete conversation');
       }
     },
-    [activeConvId, refreshConversations]
+    [activeConvId, clearInlineCandidatePolls, refreshConversations]
   );
 
   const handleRenameConversation = useCallback(
@@ -509,11 +747,14 @@ export default function App() {
     setIsClearingConversations(true);
     try {
       await api.clearAllConversations();
+      inlineCandidateRequestSeqRef.current += 1;
+      clearInlineCandidatePolls();
       setConversations([]);
       setActiveConvId(null);
       setDraftProjectId(null);
       setMessages([]);
       setStreamingContent('');
+      setInlineCandidate(null);
       setErrorMessage('');
       setIsMobileSidebarOpen(false);
       toast.success({
@@ -532,7 +773,7 @@ export default function App() {
     } finally {
       setIsClearingConversations(false);
     }
-  }, [isClearingConversations]);
+  }, [clearInlineCandidatePolls, isClearingConversations]);
 
   const handleCreateGlobalMemory = useCallback(async () => {
     const content = globalMemoryDraft.trim();
@@ -633,10 +874,77 @@ export default function App() {
     }));
   }, [activeProjectId]);
 
+  const handleCreateConversationMemory = useCallback(async () => {
+    const content = conversationMemoryDraft.trim();
+    const userId = activeUserId;
+    const conversationId = activeConvId;
+    if (!content || !userId || !conversationId || isMemoryMutating) return;
+
+    const mutationSeq = memoryMutationSeqRef.current + 1;
+    memoryMutationSeqRef.current = mutationSeq;
+    const isStale = () =>
+      memoryMutationSeqRef.current !== mutationSeq ||
+      currentUserIdRef.current !== userId ||
+      activeConvIdRef.current !== conversationId;
+
+    setIsMemoryMutating(true);
+    try {
+      const memory = await api.createMemory({
+        content,
+        scope: 'conversation',
+        projectId: activeProjectId ?? null,
+        conversationId,
+      });
+      if (isStale()) return;
+
+      setConversationMemories((prev) => [memory, ...prev]);
+      setConversationMemoryDrafts((prev) => {
+        const next = { ...prev };
+        delete next[conversationId];
+        return next;
+      });
+      setErrorMessage('');
+      toast.success({
+        content: '记忆已添加',
+        placement: 'top',
+      });
+    } catch (err) {
+      if (isStale()) return;
+
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to create memory';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      if (!isStale()) {
+        setIsMemoryMutating(false);
+      }
+    }
+  }, [
+    activeConvId,
+    activeProjectId,
+    activeUserId,
+    conversationMemoryDraft,
+    isMemoryMutating,
+  ]);
+
+  const handleConversationMemoryDraftChange = useCallback((value: string) => {
+    const conversationId = activeConvId;
+    if (!conversationId) return;
+
+    setConversationMemoryDrafts((prev) => ({
+      ...prev,
+      [conversationId]: value,
+    }));
+  }, [activeConvId]);
+
   const handleToggleMemory = useCallback(async (memory: Memory) => {
     const userId = activeUserId;
     if (!userId || isMemoryMutating) return;
-    const isProjectMemory = memory.scope === 'project' || Boolean(memory.project_id);
+    const memoryScope = getMemoryScope(memory);
 
     const mutationSeq = memoryMutationSeqRef.current + 1;
     memoryMutationSeqRef.current = mutationSeq;
@@ -650,7 +958,11 @@ export default function App() {
       });
       if (isStale()) return;
 
-      if (isProjectMemory) {
+      if (memoryScope === 'conversation') {
+        setConversationMemories((prev) =>
+          prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
+        );
+      } else if (memoryScope === 'project') {
         setProjectMemories((prev) =>
           prev.map((item) => (item.id === updatedMemory.id ? updatedMemory : item))
         );
@@ -684,7 +996,7 @@ export default function App() {
   const handleDeleteMemory = useCallback(async (memory: Memory) => {
     const userId = activeUserId;
     if (!userId || isMemoryMutating) return;
-    const isProjectMemory = memory.scope === 'project' || Boolean(memory.project_id);
+    const memoryScope = getMemoryScope(memory);
 
     const mutationSeq = memoryMutationSeqRef.current + 1;
     memoryMutationSeqRef.current = mutationSeq;
@@ -696,7 +1008,9 @@ export default function App() {
       await api.deleteMemory(memory.id);
       if (isStale()) return;
 
-      if (isProjectMemory) {
+      if (memoryScope === 'conversation') {
+        setConversationMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      } else if (memoryScope === 'project') {
         setProjectMemories((prev) => prev.filter((item) => item.id !== memory.id));
       } else {
         setGlobalMemories((prev) => prev.filter((item) => item.id !== memory.id));
@@ -720,6 +1034,121 @@ export default function App() {
       if (!isStale()) {
         setIsMemoryMutating(false);
       }
+    }
+  }, [activeUserId, isMemoryMutating]);
+
+  const upsertMemory = useCallback((memory: Memory) => {
+    const memoryScope = getMemoryScope(memory);
+    const upsert = (items: Memory[]) =>
+      items.some((item) => item.id === memory.id)
+        ? items.map((item) => (item.id === memory.id ? memory : item))
+        : [memory, ...items];
+
+    if (memoryScope === 'conversation') {
+      setConversationMemories(upsert);
+    } else if (memoryScope === 'project') {
+      setProjectMemories(upsert);
+    } else {
+      setGlobalMemories(upsert);
+    }
+  }, []);
+
+  const removeMemoryFromLists = useCallback((memoryId: string) => {
+    setGlobalMemories((prev) => prev.filter((memory) => memory.id !== memoryId));
+    setProjectMemories((prev) => prev.filter((memory) => memory.id !== memoryId));
+    setConversationMemories((prev) => prev.filter((memory) => memory.id !== memoryId));
+  }, []);
+
+  const removeCandidate = useCallback((candidateId: string) => {
+    setMemoryCandidates((prev) => prev.filter((candidate) => candidate.id !== candidateId));
+    setInlineCandidate((current) => (current?.id === candidateId ? null : current));
+  }, []);
+
+  const handleAcceptMemoryCandidate = useCallback(async (candidate: MemoryCandidate) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    setIsMemoryMutating(true);
+    try {
+      const result = await api.acceptMemoryCandidate(candidate.id);
+      if (result.archived_memory_id) {
+        removeMemoryFromLists(result.archived_memory_id);
+      }
+      if (result.memory) {
+        upsertMemory(result.memory);
+      }
+      removeCandidate(candidate.id);
+      setErrorMessage('');
+      toast.success({
+        content: '建议记忆已保存',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to accept memory candidate';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      setIsMemoryMutating(false);
+    }
+  }, [activeUserId, isMemoryMutating, removeCandidate, removeMemoryFromLists, upsertMemory]);
+
+  const handleDismissMemoryCandidate = useCallback(async (candidate: MemoryCandidate) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    setIsMemoryMutating(true);
+    try {
+      await api.dismissMemoryCandidate(candidate.id);
+      removeCandidate(candidate.id);
+      setErrorMessage('');
+      toast.success({
+        content: '建议记忆已忽略',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to dismiss memory candidate';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      setIsMemoryMutating(false);
+    }
+  }, [activeUserId, isMemoryMutating, removeCandidate]);
+
+  const handleDeferMemoryCandidate = useCallback(async (candidate: MemoryCandidate) => {
+    const userId = activeUserId;
+    if (!userId || isMemoryMutating) return;
+
+    setIsMemoryMutating(true);
+    try {
+      const deferredCandidate = await api.deferMemoryCandidate(candidate.id);
+      const settingsCandidate = deferredCandidate ?? candidate;
+      setInlineCandidate((current) => (current?.id === candidate.id ? null : current));
+      setMemoryCandidates((prev) =>
+        dedupeMemoryCandidates([{ ...settingsCandidate, surface: 'settings' }, ...prev])
+      );
+      setErrorMessage('');
+      toast.success({
+        content: '已移到稍后处理',
+        placement: 'top',
+      });
+    } catch (err) {
+      console.error(err);
+      const nextError = err instanceof Error ? err.message : 'Failed to defer memory candidate';
+      setErrorMessage(nextError);
+      toast.error({
+        content: nextError,
+        placement: 'top',
+      });
+    } finally {
+      setIsMemoryMutating(false);
     }
   }, [activeUserId, isMemoryMutating]);
 
@@ -778,6 +1207,7 @@ export default function App() {
       streamAbortControllerRef.current = abortController;
 
       let currentConvId = activeConvId;
+      const currentProjectId = activeProjectId ?? null;
       let sendFailed = false;
 
       try {
@@ -785,7 +1215,7 @@ export default function App() {
           message,
           attachments.map((attachment) => attachment.file),
           currentConvId,
-          activeProjectId ?? null,
+          currentProjectId,
           selectedModel || null,
           reasoningLevel,
           (chunk) => {
@@ -793,6 +1223,7 @@ export default function App() {
           },
           (id) => {
             currentConvId = id;
+            activeConvIdRef.current = id;
             setActiveConvId(id);
           },
           (error) => {
@@ -818,12 +1249,14 @@ export default function App() {
 
         if (currentConvId) {
           try {
+            const refreshedConversationId = currentConvId;
             const [msgs] = await Promise.all([
-              api.fetchMessages(currentConvId),
+              api.fetchMessages(refreshedConversationId),
               refreshConversations(),
             ]);
             setMessages(msgs);
             setDraftProjectId(null);
+            scheduleInlineCandidatePolls(refreshedConversationId, currentProjectId);
           } catch (err) {
             console.error(err);
             setErrorMessage(
@@ -835,7 +1268,15 @@ export default function App() {
         }
       }
     },
-    [activeConvId, activeProjectId, isStreaming, reasoningLevel, refreshConversations, selectedModel]
+    [
+      activeConvId,
+      activeProjectId,
+      isStreaming,
+      reasoningLevel,
+      refreshConversations,
+      scheduleInlineCandidatePolls,
+      selectedModel,
+    ]
   );
 
   const handleStopStreaming = useCallback(() => {
@@ -844,10 +1285,20 @@ export default function App() {
     streamAbortControllerRef.current.abort();
   }, []);
 
-  const currentTheme = useMemo(
-    () => getConversationTheme(activeConvId),
-    [activeConvId]
-  );
+  const handleToggleModelPicker = useCallback(() => {
+    setIsModelPickerOpen((prev) => !prev);
+  }, []);
+
+  const handleCloseModelPicker = useCallback(() => {
+    setIsModelPickerOpen(false);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setIsModelPickerOpen(false);
+    setIsSettingsCenterOpen(true);
+  }, []);
+
+  const currentTheme = selectedTheme;
 
   const selectedModelOption = useMemo(
     () =>
@@ -868,6 +1319,52 @@ export default function App() {
       />
     );
   }
+
+  const settingsCenterPanels: Record<SettingsSectionId, ReactNode> = {
+    general: (
+      <GeneralSettingsPanel
+        selectedTheme={selectedTheme}
+        onThemeChange={setSelectedTheme}
+      />
+    ),
+    memory: (
+      <MemorySettingsPanel
+        activeProjectName={activeProject?.name ?? null}
+        activeConversationId={activeConvId}
+        globalMemories={globalMemories}
+        projectMemories={projectMemories}
+        conversationMemories={conversationMemories}
+        globalMemoryDocument={globalMemoryDocument}
+        projectMemoryDocument={projectMemoryDocument}
+        conversationMemoryDocument={conversationMemoryDocument}
+        globalMemoryDraft={globalMemoryDraft}
+        projectMemoryDraft={projectMemoryDraft}
+        conversationMemoryDraft={conversationMemoryDraft}
+        memoryCandidates={memoryCandidates}
+        isMemoriesLoading={isMemoriesLoading}
+        isMemoryMutating={isMemoryMutating}
+        onGlobalMemoryDraftChange={setGlobalMemoryDraft}
+        onProjectMemoryDraftChange={handleProjectMemoryDraftChange}
+        onConversationMemoryDraftChange={handleConversationMemoryDraftChange}
+        onCreateGlobalMemory={handleCreateGlobalMemory}
+        onCreateProjectMemory={handleCreateProjectMemory}
+        onCreateConversationMemory={handleCreateConversationMemory}
+        onToggleMemory={handleToggleMemory}
+        onDeleteMemory={handleDeleteMemory}
+        onAcceptMemoryCandidate={handleAcceptMemoryCandidate}
+        onDismissMemoryCandidate={handleDismissMemoryCandidate}
+      />
+    ),
+    data: (
+      <DataSettingsPanel
+        key={conversations.length > 0 && !isClearingConversations ? 'can-clear' : 'clear-disabled'}
+        hasConversations={conversations.length > 0}
+        isClearingAll={isClearingConversations}
+        onClearAllConversations={handleClearAllConversations}
+      />
+    ),
+    account: <AccountSettingsPanel currentUser={currentUser} onLogout={handleLogout} />,
+  };
 
   return (
     <div
@@ -892,7 +1389,7 @@ export default function App() {
         onClearAll={handleClearAllConversations}
         onOpenSettings={() => {
           setIsMobileSidebarOpen(false);
-          setIsSettingsOpen(true);
+          handleOpenSettings();
         }}
         onLogout={handleLogout}
         currentUser={currentUser}
@@ -927,7 +1424,7 @@ export default function App() {
             type="button"
             className="mobile-topbar-icon"
             aria-label="Open settings"
-            onClick={() => setIsSettingsOpen(true)}
+            onClick={handleOpenSettings}
           >
             <Icon name="settings" />
           </button>
@@ -936,37 +1433,37 @@ export default function App() {
       <ChatWindow
         conversationId={activeConvId}
         messages={messages}
+        activeProjectName={activeProject?.name ?? null}
+        projectConversations={activeProjectConversations}
         streamingContent={streamingContent}
         isStreaming={isStreaming}
         streamingStartedAt={streamingStartedAt}
         errorMessage={errorMessage}
         currentModelLabel={selectedModelOption?.label ?? selectedModel}
-        onSend={handleSend}
-        onStopStreaming={handleStopStreaming}
-        onOpenModelPicker={() => setIsSettingsOpen(true)}
-      />
-      <SettingsDrawer
-        isOpen={isSettingsOpen}
         modelOptions={modelOptions}
         selectedModel={selectedModel}
-        selectedOption={selectedModelOption}
-        onModelChange={setSelectedModel}
+        selectedModelOption={selectedModelOption}
         reasoningLevel={reasoningLevel}
-        onReasoningLevelChange={setReasoningLevel}
-        activeProjectName={activeProject?.name ?? null}
-        globalMemories={globalMemories}
-        projectMemories={projectMemories}
-        globalMemoryDraft={globalMemoryDraft}
-        projectMemoryDraft={projectMemoryDraft}
-        isMemoriesLoading={isMemoriesLoading}
+        isModelPickerOpen={isModelPickerOpen}
+        inlineCandidate={inlineCandidate}
         isMemoryMutating={isMemoryMutating}
-        onGlobalMemoryDraftChange={setGlobalMemoryDraft}
-        onProjectMemoryDraftChange={handleProjectMemoryDraftChange}
-        onCreateGlobalMemory={handleCreateGlobalMemory}
-        onCreateProjectMemory={handleCreateProjectMemory}
-        onToggleMemory={handleToggleMemory}
-        onDeleteMemory={handleDeleteMemory}
-        onClose={() => setIsSettingsOpen(false)}
+        onSend={handleSend}
+        onStopStreaming={handleStopStreaming}
+        onToggleModelPicker={handleToggleModelPicker}
+        onCloseModelPicker={handleCloseModelPicker}
+        onModelChange={setSelectedModel}
+        onReasoningLevelChange={setReasoningLevel}
+        onSelectConversation={handleSelectConversation}
+        onAcceptInlineCandidate={handleAcceptMemoryCandidate}
+        onDeferInlineCandidate={handleDeferMemoryCandidate}
+        onDismissInlineCandidate={handleDismissMemoryCandidate}
+      />
+      <SettingsCenter
+        isOpen={isSettingsCenterOpen}
+        activeSection={activeSettingsSection}
+        onSectionChange={setActiveSettingsSection}
+        onClose={() => setIsSettingsCenterOpen(false)}
+        panels={settingsCenterPanels}
       />
     </div>
   );

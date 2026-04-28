@@ -4,6 +4,10 @@ import type {
   Conversation,
   LandingAgentMessage,
   Memory,
+  MemoryCandidate,
+  MemoryDocument,
+  MemoryCandidateReviewResult,
+  MemoryScope,
   Message,
   ModelCatalog,
   Project,
@@ -265,13 +269,15 @@ export async function updateConversation(
 }
 
 export async function fetchMemories(options: {
-  scope?: 'global' | 'project';
+  scope?: MemoryScope;
   projectId?: string | null;
+  conversationId?: string | null;
   includeArchived?: boolean;
 } = {}): Promise<Memory[]> {
   const params = new URLSearchParams();
   if (options.scope) params.set('scope', options.scope);
   if (options.projectId) params.set('project_id', options.projectId);
+  if (options.conversationId) params.set('conversation_id', options.conversationId);
   if (options.includeArchived) params.set('include_archived', 'true');
   const query = params.toString() ? `?${params.toString()}` : '';
 
@@ -283,14 +289,34 @@ export async function fetchMemories(options: {
   return res.json();
 }
 
+export async function fetchMemoryDocuments(options: {
+  scope?: MemoryScope;
+  projectId?: string | null;
+  conversationId?: string | null;
+} = {}): Promise<MemoryDocument[]> {
+  const params = new URLSearchParams();
+  if (options.scope) params.set('scope', options.scope);
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.conversationId) params.set('conversation_id', options.conversationId);
+  const query = params.toString() ? `?${params.toString()}` : '';
+
+  const res = await apiFetch(`${API_BASE}/memory-documents${query}`);
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch memory documents');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
 export async function createMemory(
   input:
     | string
     | {
         content: string;
         kind?: string;
-        scope?: 'global' | 'project';
+        scope?: MemoryScope;
         projectId?: string | null;
+        conversationId?: string | null;
       },
   kind = 'fact'
 ): Promise<Memory> {
@@ -307,6 +333,7 @@ export async function createMemory(
           kind: input.kind ?? 'fact',
           scope: input.scope ?? 'global',
           project_id: input.projectId ?? null,
+          conversation_id: input.conversationId ?? null,
         };
 
   const res = await apiFetch(`${API_BASE}/memories`, {
@@ -323,12 +350,34 @@ export async function createMemory(
 
 export async function updateMemory(
   memoryId: string,
-  updates: { content?: string; kind?: string; enabled?: boolean; status?: 'active' | 'archived' }
+  updates: {
+    content?: string;
+    kind?: string;
+    enabled?: boolean;
+    scope?: MemoryScope;
+    projectId?: string | null;
+    conversationId?: string | null;
+    status?: 'active' | 'archived';
+    importance?: number;
+    supersededById?: string | null;
+  }
 ): Promise<Memory> {
+  const payload = {
+    content: updates.content,
+    kind: updates.kind,
+    enabled: updates.enabled,
+    scope: updates.scope,
+    project_id: updates.projectId,
+    conversation_id: updates.conversationId,
+    status: updates.status,
+    importance: updates.importance,
+    superseded_by_id: updates.supersededById,
+  };
+
   const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(updates),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const errorMessage = await getErrorMessage(res, 'Failed to update memory');
@@ -345,6 +394,76 @@ export async function deleteMemory(memoryId: string): Promise<void> {
     const errorMessage = await getErrorMessage(res, 'Failed to delete memory');
     throw new Error(errorMessage);
   }
+}
+
+export async function fetchMemoryCandidates(options: {
+  status?: string;
+  surface?: 'inline' | 'settings';
+  scope?: MemoryScope;
+  projectId?: string | null;
+  conversationId?: string | null;
+} = {}): Promise<MemoryCandidate[]> {
+  const params = new URLSearchParams();
+  if (options.status) params.set('status', options.status);
+  if (options.surface) params.set('surface', options.surface);
+  if (options.scope) params.set('scope', options.scope);
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.conversationId) params.set('conversation_id', options.conversationId);
+  const query = params.toString() ? `?${params.toString()}` : '';
+
+  const res = await apiFetch(`${API_BASE}/memory-candidates${query}`);
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch memory candidates');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+async function parseOptionalJson<T>(res: Response): Promise<T | null> {
+  if (res.status === 204) {
+    return null;
+  }
+
+  const text = await res.text();
+  return text ? (JSON.parse(text) as T) : null;
+}
+
+export async function acceptMemoryCandidate(
+  candidateId: string,
+  content?: string
+): Promise<MemoryCandidateReviewResult> {
+  const res = await apiFetch(`${API_BASE}/memory-candidates/${candidateId}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(content ? { content } : {}),
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to accept memory candidate');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function dismissMemoryCandidate(candidateId: string): Promise<MemoryCandidate | null> {
+  const res = await apiFetch(`${API_BASE}/memory-candidates/${candidateId}/dismiss`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to dismiss memory candidate');
+    throw new Error(errorMessage);
+  }
+  return parseOptionalJson<MemoryCandidate>(res);
+}
+
+export async function deferMemoryCandidate(candidateId: string): Promise<MemoryCandidate | null> {
+  const res = await apiFetch(`${API_BASE}/memory-candidates/${candidateId}/defer`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to defer memory candidate');
+    throw new Error(errorMessage);
+  }
+  return parseOptionalJson<MemoryCandidate>(res);
 }
 
 export async function sendMessage(

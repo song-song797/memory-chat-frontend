@@ -12,6 +12,7 @@ interface ChatInputProps {
   onStop?: () => void;
   submitDisabled: boolean;
   isStreaming?: boolean;
+  placeholder?: string;
 }
 
 function createComposerAttachment(file: File): ComposerAttachment {
@@ -34,6 +35,7 @@ export default function ChatInput({
   onStop,
   submitDisabled,
   isStreaming = false,
+  placeholder = "What's in your mind?...",
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -178,7 +180,7 @@ export default function ChatInput({
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="What's in your mind?..."
+            placeholder={placeholder}
             rows={1}
           />
         </div>

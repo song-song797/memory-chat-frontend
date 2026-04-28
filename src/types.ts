@@ -46,13 +46,21 @@ export interface Project {
   updated_at: string;
 }
 
+export type MemoryScope = 'global' | 'project' | 'conversation';
+export type MemoryStatus = 'active' | 'archived';
+export type MemoryCandidateStatus = 'pending' | 'accepted' | 'dismissed';
+export type MemoryCandidateSurface = 'inline' | 'settings';
+export type MemoryCandidateAction = 'create' | 'update' | 'archive' | 'none';
+
 export interface Memory {
   id: string;
   content: string;
   kind: string;
-  scope?: 'global' | 'project';
+  scope?: MemoryScope;
   project_id?: string | null;
-  status?: 'active' | 'archived';
+  conversation_id?: string | null;
+  source_candidate_id?: string | null;
+  status?: MemoryStatus;
   importance?: number;
   enabled: boolean;
   created_at: string;
@@ -60,6 +68,49 @@ export interface Memory {
   archived_at?: string | null;
   last_used_at?: string | null;
   superseded_by_id?: string | null;
+}
+
+export interface MemoryCandidate {
+  id: string;
+  content: string;
+  kind?: string | null;
+  scope: MemoryScope;
+  project_id?: string | null;
+  conversation_id?: string | null;
+  action: MemoryCandidateAction;
+  target_memory_id?: string | null;
+  confidence: number;
+  importance: number;
+  status: MemoryCandidateStatus;
+  surface: MemoryCandidateSurface;
+  accepted_memory_id?: string | null;
+  source_message_id?: string | null;
+  reason?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface MemoryCandidateReviewResult {
+  candidate: MemoryCandidate;
+  memory?: Memory | null;
+  archived_memory_id?: string | null;
+}
+
+export interface MemoryDocument {
+  id: string;
+  scope: MemoryScope;
+  project_id?: string | null;
+  conversation_id?: string | null;
+  content_md: string;
+  source_memory_ids: string;
+  revision: number;
+  is_stale: boolean;
+  generated_by: 'ai' | 'fallback' | string;
+  generation_model?: string | null;
+  generation_error?: string | null;
+  generated_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuthResponse {

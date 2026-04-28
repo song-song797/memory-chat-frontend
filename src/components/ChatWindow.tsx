@@ -6,22 +6,48 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { fetchAttachmentBlobUrl } from '../services/api';
-import type { Attachment, ComposerAttachment, Message } from '../types';
+import type {
+  Attachment,
+  ComposerAttachment,
+  Conversation,
+  MemoryCandidate,
+  Message,
+  ModelOption,
+  ReasoningLevel,
+} from '../types';
 import { message } from '../services/message';
 import ChatInput from './ChatInput';
 import Icon from './Icons';
+import InlineMemoryCandidate from './InlineMemoryCandidate';
+import ModelPickerPopover from './ModelPickerPopover';
 
 interface ChatWindowProps {
   conversationId: string | null;
   messages: Message[];
+  activeProjectName: string | null;
+  projectConversations: Conversation[];
   streamingContent: string;
   isStreaming: boolean;
   streamingStartedAt: number | null;
   errorMessage: string;
   currentModelLabel: string;
+  modelOptions: ModelOption[];
+  selectedModel: string;
+  selectedModelOption: ModelOption | null;
+  reasoningLevel: ReasoningLevel;
+  isModelPickerOpen: boolean;
+  inlineCandidate: MemoryCandidate | null;
+  isMemoryMutating: boolean;
   onSend: (payload: { message: string; attachments: ComposerAttachment[] }) => void;
   onStopStreaming: () => void;
-  onOpenModelPicker: () => void;
+  onToggleModelPicker: () => void;
+  onCloseModelPicker: () => void;
+  onModelChange: (value: string) => void;
+  onReasoningLevelChange: (level: ReasoningLevel) => void;
+  onSelectConversation: (id: string) => void;
+  onAcceptInlineCandidate: (candidate: MemoryCandidate) => void;
+  onDeferInlineCandidate: (candidate: MemoryCandidate) => void;
+  onDismissInlineCandidate: (candidate: MemoryCandidate) => void;
 }
 
 type ThreadActionKey = 'copy' | 'refresh' | 'read' | 'like' | 'dislike' | 'share' | 'more';
@@ -128,6 +154,19 @@ const THREAD_ACTIONS: ThreadActionConfig[] = [
     ariaLabel: 'More actions',
   },
 ];
+
+function formatProjectConversationDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+  }).format(date);
+}
 
 const USER_THREAD_ACTIONS: ThreadActionConfig[] = [
   {
@@ -445,14 +484,30 @@ function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
 export default function ChatWindow({
   conversationId,
   messages,
+  activeProjectName,
+  projectConversations,
   streamingContent,
   isStreaming,
   streamingStartedAt,
   errorMessage,
   currentModelLabel,
+  modelOptions,
+  selectedModel,
+  selectedModelOption,
+  reasoningLevel,
+  isModelPickerOpen,
+  inlineCandidate,
+  isMemoryMutating,
   onSend,
   onStopStreaming,
-  onOpenModelPicker,
+  onToggleModelPicker,
+  onCloseModelPicker,
+  onModelChange,
+  onReasoningLevelChange,
+  onSelectConversation,
+  onAcceptInlineCandidate,
+  onDeferInlineCandidate,
+  onDismissInlineCandidate,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const lastErrorMessageRef = useRef('');
@@ -589,9 +644,11 @@ export default function ChatWindow({
   }, [isStreaming, streamingStartedAt]);
 
   const showEmpty = messages.length === 0 && !isStreaming;
+  const showProjectHome = showEmpty && Boolean(activeProjectName);
+  const showWelcomeHome = showEmpty && !showProjectHome;
 
   useEffect(() => {
-    if (!showEmpty) {
+    if (!showWelcomeHome) {
       setTypedWelcomeTitle(WELCOME_TITLE);
       return;
     }
@@ -609,7 +666,7 @@ export default function ChatWindow({
     }, 48);
 
     return () => window.clearInterval(timer);
-  }, [showEmpty]);
+  }, [showWelcomeHome]);
 
   useEffect(() => {
     if (!errorMessage) {
@@ -635,13 +692,72 @@ export default function ChatWindow({
         type="button"
         className="chat-model-trigger"
         aria-label={`Current model ${currentModelLabel}`}
-        onClick={onOpenModelPicker}
+        aria-expanded={isModelPickerOpen}
+        aria-haspopup="dialog"
+        onClick={onToggleModelPicker}
       >
         <span>{currentModelLabel}</span>
         <Icon name="arrow-down" />
       </button>
+      <ModelPickerPopover
+        isOpen={isModelPickerOpen}
+        modelOptions={modelOptions}
+        selectedModel={selectedModel}
+        selectedOption={selectedModelOption}
+        reasoningLevel={reasoningLevel}
+        onModelChange={onModelChange}
+        onReasoningLevelChange={onReasoningLevelChange}
+        onClose={onCloseModelPicker}
+      />
 
-      {showEmpty ? (
+      {showProjectHome && activeProjectName ? (
+        <section className="project-home-stage">
+          <div className="project-home-scroll">
+            <div className="project-home-panel">
+              <header className="project-home-head">
+                <span className="project-home-eyebrow">当前项目</span>
+                <h1>{activeProjectName}</h1>
+              </header>
+
+              <div className="project-home-composer">
+                <ChatInput
+                  onSend={onSend}
+                  submitDisabled={false}
+                  placeholder={`在 ${activeProjectName} 中开始新聊天`}
+                />
+              </div>
+
+              <section className="project-home-chats" aria-label={`${activeProjectName} chats`}>
+                <div className="project-home-tabs">
+                  <span className="is-active">聊天</span>
+                </div>
+
+                {projectConversations.length > 0 ? (
+                  <div className="project-home-chat-list">
+                    {projectConversations.map((conversation) => (
+                      <button
+                        key={conversation.id}
+                        type="button"
+                        className="project-home-chat-row"
+                        onClick={() => onSelectConversation(conversation.id)}
+                      >
+                        <span className="project-home-chat-copy">
+                          <strong>{conversation.title}</strong>
+                        </span>
+                        <span className="project-home-chat-date">
+                          {formatProjectConversationDate(conversation.updated_at)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="project-home-empty">这个项目下面还没有聊天。</p>
+                )}
+              </section>
+            </div>
+          </div>
+        </section>
+      ) : showWelcomeHome ? (
         <section className="welcome-stage">
           <div className="welcome-scroll">
             <h1>
@@ -849,6 +965,15 @@ export default function ChatWindow({
           </div>
         </div>
       )}
+      {inlineCandidate && !isStreaming ? (
+        <InlineMemoryCandidate
+          candidate={inlineCandidate}
+          isMutating={isMemoryMutating}
+          onAccept={onAcceptInlineCandidate}
+          onDefer={onDeferInlineCandidate}
+          onDismiss={onDismissInlineCandidate}
+        />
+      ) : null}
     </main>
   );
 }
