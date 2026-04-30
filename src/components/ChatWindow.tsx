@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { WheelEvent as ReactWheelEvent } from 'react';
+import { createPortal } from 'react-dom';
 import hljs from 'highlight.js/lib/common';
 import { codeToHtml } from 'shiki';
 import ReactMarkdown from 'react-markdown';
@@ -108,6 +110,10 @@ const featureCards = [
 
 const WELCOME_TITLE = 'Good day! How may I assist you today?';
 const AUTO_SCROLL_THRESHOLD = 80;
+const PREVIEW_ZOOM_STEP = 0.18;
+const PREVIEW_MIN_ZOOM = 0.4;
+const PREVIEW_MAX_ZOOM = 8;
+const PREVIEW_ROTATION_STEP = 90;
 const THREAD_ACTIONS: ThreadActionConfig[] = [
   {
     key: 'copy',
@@ -201,6 +207,24 @@ function normalizeMarkdownContent(content: string) {
 
   return normalized;
 }
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function resolveNearestRotationTarget(current: number, desired: number) {
+  const turns = Math.round((current - desired) / 360);
+  let target = desired + turns * 360;
+
+  if (target - current > 180) {
+    target -= 360;
+  } else if (current - target > 180) {
+    target += 360;
+  }
+
+  return target;
+}
+
 function formatAttachmentSize(sizeBytes: number) {
   if (sizeBytes >= 1024 * 1024) {
     return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -386,7 +410,13 @@ function MarkdownMessage({ content }: { content: string }) {
   );
 }
 
-function AttachmentImage({ attachment }: { attachment: Attachment }) {
+function AttachmentImage({
+  attachment,
+  onPreview,
+}: {
+  attachment: Attachment;
+  onPreview: (preview: { url: string; name: string }) => void;
+}) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
 
@@ -433,10 +463,26 @@ function AttachmentImage({ attachment }: { attachment: Attachment }) {
   if (!resolvedUrl) {
     return <div className="thread-image-placeholder">{"\u56fe\u7247\u52a0\u8f7d\u4e2d..."}</div>;
   }
-  return <img src={resolvedUrl} alt={attachment.name} />;
+
+  return (
+    <button
+      type="button"
+      className="thread-image-button"
+      onClick={() => onPreview({ url: resolvedUrl, name: attachment.name })}
+      aria-label={`Preview ${attachment.name}`}
+    >
+      <img src={resolvedUrl} alt={attachment.name} />
+    </button>
+  );
 }
 
-function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
+function AttachmentGallery({
+  attachments,
+  onPreview,
+}: {
+  attachments: Attachment[];
+  onPreview: (preview: { url: string; name: string }) => void;
+}) {
   if (attachments.length === 0) {
     return null;
   }
@@ -450,7 +496,7 @@ function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
         <div className="thread-image-grid">
           {imageAttachments.map((attachment) => (
             <div key={attachment.id} className="thread-image-card">
-              <AttachmentImage attachment={attachment} />
+              <AttachmentImage attachment={attachment} onPreview={onPreview} />
             </div>
           ))}
         </div>
@@ -478,6 +524,488 @@ function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ImagePreviewOverlay({
+  preview,
+  onClose,
+}: {
+  preview: { url: string; name: string };
+  onClose: () => void;
+}) {
+  const [isImageReady, setIsImageReady] = useState(false);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
+  const previewDialogRef = useRef<HTMLDivElement>(null);
+  const previewStageRef = useRef<HTMLDivElement>(null);
+  const previewFrameRef = useRef<HTMLDivElement>(null);
+  const previewImageRef = useRef<HTMLImageElement>(null);
+  const previewReadoutRef = useRef<HTMLDivElement>(null);
+  const previewAnimationFrameRef = useRef<number | null>(null);
+  const previewTransformRef = useRef({ x: 0, y: 0, zoom: 1, rotation: 0 });
+  const previewTargetRef = useRef({ x: 0, y: 0, zoom: 1, rotation: 0 });
+  const previewZoomReadoutRef = useRef(100);
+  const previewDragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  const updatePreviewReadout = (zoom: number) => {
+    const nextReadout = Math.round(zoom * 100);
+    if (previewZoomReadoutRef.current === nextReadout) {
+      return;
+    }
+
+    previewZoomReadoutRef.current = nextReadout;
+    if (previewReadoutRef.current) {
+      previewReadoutRef.current.textContent = `${nextReadout}%`;
+    }
+  };
+
+  const applyPreviewTransform = (transform: { x: number; y: number; zoom: number; rotation: number }) => {
+    if (previewFrameRef.current) {
+      previewFrameRef.current.style.transform = `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.zoom})`;
+    }
+
+    if (previewImageRef.current) {
+      previewImageRef.current.style.transform = `translate3d(0, 0, 0) rotate(${transform.rotation}deg)`;
+    }
+  };
+
+  const commitPreviewTransform = (transform: {
+    x: number;
+    y: number;
+    zoom: number;
+    rotation: number;
+  }) => {
+    stopPreviewAnimation();
+    previewTransformRef.current = transform;
+    previewTargetRef.current = transform;
+    applyPreviewTransform(transform);
+    updatePreviewReadout(transform.zoom);
+  };
+
+  const animatePreviewTransform = () => {
+    previewAnimationFrameRef.current = null;
+
+    const current = previewTransformRef.current;
+    const target = previewTargetRef.current;
+    const nextZoom = current.zoom + (target.zoom - current.zoom) * 0.22;
+    const nextRotation = current.rotation + (target.rotation - current.rotation) * 0.18;
+    const zoomSettled = Math.abs(target.zoom - current.zoom) < 0.0025;
+    const rotationSettled = Math.abs(target.rotation - current.rotation) < 0.12;
+    const nextTransform = {
+      x: Number((current.x + (target.x - current.x) * 0.34).toFixed(2)),
+      y: Number((current.y + (target.y - current.y) * 0.34).toFixed(2)),
+      zoom: zoomSettled ? target.zoom : Number(nextZoom.toFixed(4)),
+      rotation: rotationSettled ? target.rotation : Number(nextRotation.toFixed(4)),
+    };
+    const xSettled = Math.abs(target.x - current.x) < 0.35;
+    const ySettled = Math.abs(target.y - current.y) < 0.35;
+
+    if (xSettled) {
+      nextTransform.x = target.x;
+    }
+
+    if (ySettled) {
+      nextTransform.y = target.y;
+    }
+
+    previewTransformRef.current = nextTransform;
+    applyPreviewTransform(nextTransform);
+    updatePreviewReadout(nextTransform.zoom);
+
+    if (!zoomSettled || !rotationSettled || !xSettled || !ySettled) {
+      previewAnimationFrameRef.current = window.requestAnimationFrame(animatePreviewTransform);
+      return;
+    }
+  };
+
+  const queuePreviewTransform = (
+    updater: (current: { x: number; y: number; zoom: number; rotation: number }) => {
+      x: number;
+      y: number;
+      zoom: number;
+      rotation: number;
+    }
+  ) => {
+    const nextTarget = updater(previewTargetRef.current);
+    previewTargetRef.current = {
+      x: Number(nextTarget.x.toFixed(2)),
+      y: Number(nextTarget.y.toFixed(2)),
+      zoom: clamp(Number(nextTarget.zoom.toFixed(2)), PREVIEW_MIN_ZOOM, PREVIEW_MAX_ZOOM),
+      rotation: Number(nextTarget.rotation.toFixed(2)),
+    };
+
+    if (previewAnimationFrameRef.current !== null) {
+      return;
+    }
+
+    previewAnimationFrameRef.current = window.requestAnimationFrame(animatePreviewTransform);
+  };
+
+  const stopPreviewAnimation = () => {
+    if (previewAnimationFrameRef.current === null) {
+      return;
+    }
+
+    window.cancelAnimationFrame(previewAnimationFrameRef.current);
+    previewAnimationFrameRef.current = null;
+  };
+
+  const resolvePreviewAnchor = (clientX?: number, clientY?: number) => {
+    const stage = previewStageRef.current;
+    if (!stage) {
+      return { x: 0, y: 0 };
+    }
+
+    const rect = stage.getBoundingClientRect();
+    const anchorX = clientX ?? rect.left + rect.width / 2;
+    const anchorY = clientY ?? rect.top + rect.height / 2;
+
+    return {
+      x: anchorX - rect.left - rect.width / 2,
+      y: anchorY - rect.top - rect.height / 2,
+    };
+  };
+
+  const buildZoomTransform = (
+    current: { x: number; y: number; zoom: number; rotation: number },
+    zoomFactor: number,
+    anchor: { x: number; y: number }
+  ) => {
+    const nextZoom = clamp(Number((current.zoom * zoomFactor).toFixed(4)), PREVIEW_MIN_ZOOM, PREVIEW_MAX_ZOOM);
+    const appliedFactor = nextZoom / current.zoom;
+
+    return {
+      ...current,
+      zoom: nextZoom,
+      x: Number((anchor.x - (anchor.x - current.x) * appliedFactor).toFixed(2)),
+      y: Number((anchor.y - (anchor.y - current.y) * appliedFactor).toFixed(2)),
+    };
+  };
+
+  const handlePreviewZoom = (delta: number, clientX?: number, clientY?: number) => {
+    const anchor = resolvePreviewAnchor(clientX, clientY);
+    const zoomFactor = 1 + delta;
+
+    queuePreviewTransform((current) => buildZoomTransform(current, zoomFactor, anchor));
+  };
+
+  const handlePreviewRotate = (delta: number) => {
+    queuePreviewTransform((current) => ({
+      ...current,
+      rotation: current.rotation + delta,
+    }));
+  };
+
+  const handlePreviewReset = () => {
+    queuePreviewTransform((current) => ({
+      x: 0,
+      y: 0,
+      zoom: 1,
+      rotation: resolveNearestRotationTarget(current.rotation, 0),
+    }));
+  };
+
+  const handlePreviewDownload = () => {
+    const link = document.createElement('a');
+    link.href = preview.url;
+    link.download = preview.name || 'preview-image';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const calculateExpandedZoom = () => {
+    const stage = previewStageRef.current;
+    const image = previewImageRef.current;
+    if (!stage || !image) {
+      return 1;
+    }
+
+    const availableWidth = Math.max(0, stage.clientWidth - 32);
+    const availableHeight = Math.max(0, stage.clientHeight - 32);
+    const rotationTurns = Math.abs(Math.round(previewTransformRef.current.rotation / 90)) % 2;
+    const naturalWidth = rotationTurns === 0 ? image.naturalWidth : image.naturalHeight;
+    const naturalHeight = rotationTurns === 0 ? image.naturalHeight : image.naturalWidth;
+    const baseScale = Math.min(1, availableWidth / naturalWidth, availableHeight / naturalHeight);
+    const baseWidth = naturalWidth * baseScale;
+    const baseHeight = naturalHeight * baseScale;
+
+    if (baseWidth === 0 || baseHeight === 0) {
+      return 1;
+    }
+
+    return clamp(
+      Number(Math.min(availableWidth / baseWidth, availableHeight / baseHeight).toFixed(4)),
+      PREVIEW_MIN_ZOOM,
+      PREVIEW_MAX_ZOOM
+    );
+  };
+
+  const handleClosePreview = async () => {
+    onClose();
+  };
+
+  const handlePreviewExpand = () => {
+    if (isPreviewExpanded) {
+      setIsPreviewExpanded(false);
+      queuePreviewTransform((current) => ({
+        ...current,
+        x: 0,
+        y: 0,
+        zoom: 1,
+      }));
+      return;
+    }
+
+    const expandedZoom = calculateExpandedZoom();
+    if (!expandedZoom) {
+      return;
+    }
+
+    setIsPreviewExpanded(true);
+    queuePreviewTransform((current) => ({
+      ...current,
+      x: 0,
+      y: 0,
+      zoom: expandedZoom,
+    }));
+  };
+
+  const handlePreviewWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    const zoomFactor = Math.exp(-event.deltaY * 0.0012);
+    if (Math.abs(zoomFactor - 1) < 0.001) {
+      return;
+    }
+
+    const anchor = resolvePreviewAnchor(event.clientX, event.clientY);
+    commitPreviewTransform(buildZoomTransform(previewTransformRef.current, zoomFactor, anchor));
+  };
+
+  const handlePreviewPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isImageReady || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    stopPreviewAnimation();
+    previewDragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: previewTransformRef.current.x,
+      originY: previewTransformRef.current.y,
+    };
+
+    if (previewStageRef.current) {
+      previewStageRef.current.dataset.dragging = 'true';
+    }
+
+    previewStageRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const handlePreviewPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = previewDragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextX = dragState.originX + (event.clientX - dragState.startX);
+    const nextY = dragState.originY + (event.clientY - dragState.startY);
+    const nextTransform = {
+      ...previewTransformRef.current,
+      x: Number(nextX.toFixed(2)),
+      y: Number(nextY.toFixed(2)),
+    };
+
+    commitPreviewTransform(nextTransform);
+  };
+
+  const handlePreviewPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (previewDragStateRef.current?.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    previewDragStateRef.current = null;
+    if (previewStageRef.current) {
+      delete previewStageRef.current.dataset.dragging;
+    }
+    if (previewStageRef.current?.hasPointerCapture(event.pointerId)) {
+      previewStageRef.current.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    previewTransformRef.current = { x: 0, y: 0, zoom: 1, rotation: 0 };
+    previewTargetRef.current = { x: 0, y: 0, zoom: 1, rotation: 0 };
+    previewZoomReadoutRef.current = 100;
+    previewDragStateRef.current = null;
+    setIsPreviewExpanded(false);
+    if (previewReadoutRef.current) {
+      previewReadoutRef.current.textContent = '100%';
+    }
+    applyPreviewTransform(previewTransformRef.current);
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    setIsImageReady(false);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        void handleClosePreview();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+      if (previewAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(previewAnimationFrameRef.current);
+      }
+      previewDragStateRef.current = null;
+      if (previewStageRef.current) {
+        delete previewStageRef.current.dataset.dragging;
+      }
+    };
+  }, [preview.url]);
+
+  return createPortal(
+    <div className="thread-image-preview-layer" role="presentation">
+      <button
+        type="button"
+        className="thread-image-preview-backdrop"
+        aria-label="Close image preview"
+        onClick={() => {
+          void handleClosePreview();
+        }}
+      />
+      <div
+        ref={previewDialogRef}
+        className="thread-image-preview-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={preview.name || 'Image preview'}
+      >
+        <button
+          type="button"
+          className="thread-image-preview-close"
+          aria-label="Close image preview"
+          onClick={() => {
+            void handleClosePreview();
+          }}
+        >
+          <Icon name="close" />
+        </button>
+        <div
+          ref={previewStageRef}
+          className={`thread-image-preview-stage ${isImageReady ? '' : 'is-loading'}`}
+          onDragStart={(event) => {
+            event.preventDefault();
+          }}
+          onWheel={handlePreviewWheel}
+          onPointerMove={handlePreviewPointerMove}
+          onPointerDown={handlePreviewPointerDown}
+          onPointerUp={handlePreviewPointerUp}
+          onPointerCancel={handlePreviewPointerUp}
+        >
+          <div className="thread-image-preview-media-frame" ref={previewFrameRef}>
+            <img
+              ref={previewImageRef}
+              className="thread-image-preview-media"
+              src={preview.url}
+              alt={preview.name}
+              decoding="async"
+              draggable={false}
+              onDragStart={(event) => {
+                event.preventDefault();
+              }}
+              onLoad={() => {
+                setIsImageReady(true);
+                applyPreviewTransform(previewTransformRef.current);
+              }}
+            />
+          </div>
+          {!isImageReady ? (
+            <div className="thread-image-preview-loading">图片加载中...</div>
+          ) : null}
+        </div>
+        <div className="thread-image-preview-toolbar" role="toolbar" aria-label="Image controls">
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label="Zoom out"
+            onClick={() => handlePreviewZoom(-PREVIEW_ZOOM_STEP)}
+          >
+            <Icon name="zoom-out" />
+          </button>
+          <div className="thread-image-preview-readout" ref={previewReadoutRef}>
+            100%
+          </div>
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label="Zoom in"
+            onClick={() => handlePreviewZoom(PREVIEW_ZOOM_STEP)}
+          >
+            <Icon name="zoom-in" />
+          </button>
+          <span className="thread-image-preview-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label="Rotate left"
+            onClick={() => handlePreviewRotate(-PREVIEW_ROTATION_STEP)}
+          >
+            <Icon name="rotate-left" />
+          </button>
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label="Rotate right"
+            onClick={() => handlePreviewRotate(PREVIEW_ROTATION_STEP)}
+          >
+            <Icon name="rotate-right" />
+          </button>
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label="Reset preview"
+            onClick={handlePreviewReset}
+          >
+            <Icon name="refresh" />
+          </button>
+          <span className="thread-image-preview-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label={isPreviewExpanded ? 'Exit page fit' : 'Fit image to page'}
+            onClick={handlePreviewExpand}
+          >
+            <Icon name="fullscreen" />
+          </button>
+          <button
+            type="button"
+            className="thread-image-preview-tool"
+            aria-label="Download image"
+            onClick={handlePreviewDownload}
+          >
+            <Icon name="download" />
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -522,6 +1050,7 @@ export default function ChatWindow({
     messageId: string;
     action: ThreadActionKey;
   } | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
 
   const showActionFeedback = (messageId: string, action: ThreadActionKey) => {
     setActiveActionFeedback({ messageId, action });
@@ -827,7 +1356,10 @@ export default function ChatWindow({
                   >
                     {item.role === 'user' && (
                       <div className="thread-user-block">
-                        <AttachmentGallery attachments={attachments} />
+                        <AttachmentGallery
+                          attachments={attachments}
+                          onPreview={setPreviewImage}
+                        />
                         {hasUserText ? (
                           <div className="thread-head is-user">
                             <div className="thread-userline is-user">
@@ -877,7 +1409,10 @@ export default function ChatWindow({
 
                     {item.role === 'assistant' && (
                       <div className="thread-answer-wrap">
-                        <AttachmentGallery attachments={attachments} />
+                        <AttachmentGallery
+                          attachments={attachments}
+                          onPreview={setPreviewImage}
+                        />
                         <div className="thread-answer-card">
                           <div className="thread-label-row">
                             <span className="thread-brand-label">CHAT A.I+</span>
@@ -973,6 +1508,9 @@ export default function ChatWindow({
           onDefer={onDeferInlineCandidate}
           onDismiss={onDismissInlineCandidate}
         />
+      ) : null}
+      {previewImage ? (
+        <ImagePreviewOverlay preview={previewImage} onClose={() => setPreviewImage(null)} />
       ) : null}
     </main>
   );

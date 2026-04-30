@@ -15,17 +15,38 @@ interface ChatInputProps {
   placeholder?: string;
 }
 
+function getFileExtension(file: File): string {
+  if (file.name.includes('.')) {
+    return file.name.split('.').pop() || 'png';
+  }
+
+  const subtype = file.type.split('/')[1];
+  return subtype || 'png';
+}
+
+function normalizeAttachmentFile(file: File): File {
+  if (file.name) {
+    return file;
+  }
+
+  return new File([file], `pasted-image-${Date.now()}.${getFileExtension(file)}`, {
+    type: file.type,
+    lastModified: Date.now(),
+  });
+}
+
 function createComposerAttachment(file: File): ComposerAttachment {
-  const kind = file.type.startsWith('image/') ? 'image' : 'file';
-  const previewUrl = kind === 'image' ? URL.createObjectURL(file) : undefined;
+  const normalizedFile = normalizeAttachmentFile(file);
+  const kind = normalizedFile.type.startsWith('image/') ? 'image' : 'file';
+  const previewUrl = kind === 'image' ? URL.createObjectURL(normalizedFile) : undefined;
 
   return {
     id: crypto.randomUUID(),
-    file,
-    name: file.name,
-    mime_type: file.type || 'application/octet-stream',
+    file: normalizedFile,
+    name: normalizedFile.name,
+    mime_type: normalizedFile.type || 'application/octet-stream',
     kind,
-    size_bytes: file.size,
+    size_bytes: normalizedFile.size,
     preview_url: previewUrl,
   };
 }
@@ -100,17 +121,36 @@ export default function ChatInput({
     });
   };
 
+  const appendFiles = (files: File[]) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    setAttachments((current) => [...current, ...files.map((file) => createComposerAttachment(file))]);
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.target.files ?? []);
     if (selectedFiles.length === 0) {
       return;
     }
 
-    setAttachments((current) => [
-      ...current,
-      ...selectedFiles.map((file) => createComposerAttachment(file)),
-    ]);
+    appendFiles(selectedFiles);
     event.target.value = '';
+  };
+
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedImages = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (pastedImages.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    appendFiles(pastedImages);
   };
 
   const handleSend = () => {
@@ -180,6 +220,7 @@ export default function ChatInput({
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={placeholder}
             rows={1}
           />
