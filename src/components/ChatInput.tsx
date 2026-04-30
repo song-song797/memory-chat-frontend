@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ComposerAttachment } from '../types';
 import Icon from './Icons';
 
@@ -51,6 +52,59 @@ function createComposerAttachment(file: File): ComposerAttachment {
   };
 }
 
+function ComposerImagePreview({
+  preview,
+  onClose,
+}: {
+  preview: { url: string; name: string };
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="thread-image-preview-layer" role="presentation">
+      <button
+        type="button"
+        className="thread-image-preview-backdrop"
+        aria-label="Close image preview"
+        onClick={onClose}
+      />
+      <div className="thread-image-preview-dialog" role="dialog" aria-modal="true" aria-label={preview.name}>
+        <button
+          type="button"
+          className="thread-image-preview-close"
+          aria-label="Close image preview"
+          onClick={onClose}
+        >
+          <Icon name="close" />
+        </button>
+        <div className="thread-image-preview-stage">
+          <div className="thread-image-preview-media-frame">
+            <img className="thread-image-preview-media" src={preview.url} alt={preview.name} />
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export default function ChatInput({
   onSend,
   onStop,
@@ -60,6 +114,7 @@ export default function ChatInput({
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef<ComposerAttachment[]>([]);
@@ -188,11 +243,23 @@ export default function ChatInput({
             {attachments.map((attachment) => (
               <div key={attachment.id} className="composer-attachment-chip">
                 {attachment.kind === 'image' && attachment.preview_url ? (
-                  <img
-                    className="composer-attachment-thumb"
-                    src={attachment.preview_url}
-                    alt={attachment.name}
-                  />
+                  <button
+                    type="button"
+                    className="composer-attachment-thumb-button"
+                    aria-label={`Preview ${attachment.name}`}
+                    onClick={() =>
+                      setPreviewImage({
+                        url: attachment.preview_url!,
+                        name: attachment.name,
+                      })
+                    }
+                  >
+                    <img
+                      className="composer-attachment-thumb"
+                      src={attachment.preview_url}
+                      alt={attachment.name}
+                    />
+                  </button>
                 ) : (
                   <span className="composer-attachment-icon">
                     <Icon name="link" />
@@ -266,6 +333,9 @@ export default function ChatInput({
           </button>
         </div>
       </div>
+      {previewImage ? (
+        <ComposerImagePreview preview={previewImage} onClose={() => setPreviewImage(null)} />
+      ) : null}
     </div>
   );
 }

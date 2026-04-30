@@ -1701,7 +1701,6 @@
   overflow: hidden;
   border: 1px solid rgba(44, 44, 52, 0.08);
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: var(--surface-shadow);
 }
 
 .thread-image-card {
@@ -1709,6 +1708,10 @@
   width: fit-content;
   max-width: 280px;
   border-radius: 18px;
+}
+
+.thread-file-card {
+  box-shadow: var(--surface-shadow);
 }
 
 .thread-image-button {
@@ -1733,11 +1736,6 @@
 
 .thread-image-button img {
   transition: transform 160ms ease, filter 160ms ease;
-}
-
-.thread-image-button:hover img {
-  transform: scale(1.02);
-  filter: saturate(1.04);
 }
 
 .thread-image-button:focus-visible {
@@ -1843,8 +1841,8 @@
   top: 18px;
   right: 18px;
   z-index: 4;
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 999px;
   background: rgba(82, 86, 96, 0.78);
@@ -1961,10 +1959,14 @@
   background: rgba(255, 255, 255, 0.14);
 }
 
-.thread-image-preview-tool svg,
-.thread-image-preview-close svg {
+.thread-image-preview-tool svg {
   width: 20px;
   height: 20px;
+}
+
+.thread-image-preview-close svg {
+  width: 18px;
+  height: 18px;
 }
 
 @media (max-width: 720px) {
@@ -1975,8 +1977,8 @@
   .thread-image-preview-close {
     top: 12px;
     right: 12px;
-    width: 46px;
-    height: 46px;
+    width: 40px;
+    height: 40px;
   }
 
   .thread-image-preview-stage {
@@ -2776,13 +2778,20 @@
   align-items: center;
   gap: 10px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
-  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
 }
 
 .composer-attachment-chip:hover {
   border-color: rgba(93, 102, 255, 0.24);
   background: rgba(242, 244, 255, 0.98);
-  transform: translateY(-1px);
+}
+
+.composer-attachment-thumb-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  border-radius: 12px;
 }
 
 .composer-attachment-thumb,

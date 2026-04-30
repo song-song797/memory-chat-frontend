@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { WheelEvent as ReactWheelEvent } from 'react';
 import { createPortal } from 'react-dom';
 import hljs from 'highlight.js/lib/common';
@@ -114,6 +114,7 @@ const PREVIEW_ZOOM_STEP = 0.18;
 const PREVIEW_MIN_ZOOM = 0.4;
 const PREVIEW_MAX_ZOOM = 8;
 const PREVIEW_ROTATION_STEP = 90;
+const CODE_HIGHLIGHT_CACHE = new Map<string, string>();
 const THREAD_ACTIONS: ThreadActionConfig[] = [
   {
     key: 'copy',
@@ -290,7 +291,7 @@ function detectCodeLanguage(code: string, language: string | null) {
   return autoDetected.language ?? (explicitLanguage || null);
 }
 
-function CodeBlock({
+const CodeBlock = memo(function CodeBlock({
   code,
   language,
 }: {
@@ -298,10 +299,14 @@ function CodeBlock({
   language: string | null;
 }) {
   const [isCopied, setIsCopied] = useState(false);
-  const [highlightedHtml, setHighlightedHtml] = useState('');
   const copyTimerRef = useRef<number | null>(null);
-  const detectedLanguage = detectCodeLanguage(code, language);
-  const languageLabel = formatCodeLanguage(detectedLanguage ?? language);
+  const detectedLanguage = useMemo(() => detectCodeLanguage(code, language), [code, language]);
+  const languageLabel = useMemo(
+    () => formatCodeLanguage(detectedLanguage ?? language),
+    [detectedLanguage, language]
+  );
+  const cacheKey = useMemo(() => `${detectedLanguage ?? 'text'}\u0000${code}`, [code, detectedLanguage]);
+  const [highlightedHtml, setHighlightedHtml] = useState(() => CODE_HIGHLIGHT_CACHE.get(cacheKey) ?? '');
 
   const handleCopy = async () => {
     try {
@@ -326,6 +331,19 @@ function CodeBlock({
 
   useEffect(() => {
     let isCancelled = false;
+    const cachedHtml = CODE_HIGHLIGHT_CACHE.get(cacheKey);
+
+    if (cachedHtml) {
+      setHighlightedHtml(cachedHtml);
+      return () => {
+        isCancelled = true;
+        if (copyTimerRef.current) {
+          window.clearTimeout(copyTimerRef.current);
+        }
+      };
+    }
+
+    setHighlightedHtml('');
 
     void codeToHtml(code, {
       lang: detectedLanguage ?? 'text',
@@ -333,6 +351,7 @@ function CodeBlock({
     })
       .then((html) => {
         if (!isCancelled) {
+          CODE_HIGHLIGHT_CACHE.set(cacheKey, html);
           setHighlightedHtml(html);
         }
       })
@@ -348,7 +367,7 @@ function CodeBlock({
         window.clearTimeout(copyTimerRef.current);
       }
     };
-  }, [code, detectedLanguage]);
+  }, [cacheKey, code, detectedLanguage]);
 
   return (
     <div className="thread-code-block">
@@ -379,9 +398,11 @@ function CodeBlock({
       </div>
     </div>
   );
-}
+});
 
-function MarkdownMessage({ content }: { content: string }) {
+const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: string }) {
+  const normalizedContent = useMemo(() => normalizeMarkdownContent(content), [content]);
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
@@ -405,10 +426,10 @@ function MarkdownMessage({ content }: { content: string }) {
         },
       }}
     >
-      {normalizeMarkdownContent(content)}
+      {normalizedContent}
     </ReactMarkdown>
   );
-}
+});
 
 function AttachmentImage({
   attachment,
