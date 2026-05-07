@@ -21,6 +21,7 @@ import { message } from '../services/message';
 import ChatInput from './ChatInput';
 import Icon from './Icons';
 import InlineMemoryCandidate from './InlineMemoryCandidate';
+import SearchIndicator from './SearchIndicator';
 import ModelPickerPopover from './ModelPickerPopover';
 
 interface ChatWindowProps {
@@ -50,6 +51,8 @@ interface ChatWindowProps {
   onAcceptInlineCandidate: (candidate: MemoryCandidate) => void;
   onDeferInlineCandidate: (candidate: MemoryCandidate) => void;
   onDismissInlineCandidate: (candidate: MemoryCandidate) => void;
+  searchStatus: { status: 'searching' | 'results' | null; query?: string; urls?: string[] };
+  citations: Array<{ index: number; title: string; url: string }>;
 }
 
 type ThreadActionKey = 'copy' | 'refresh' | 'read' | 'like' | 'dislike' | 'share' | 'more';
@@ -400,8 +403,33 @@ const CodeBlock = memo(function CodeBlock({
   );
 });
 
-const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: string }) {
+function injectCitationLinks(
+  text: string,
+  citations: Array<{ index: number; title: string; url: string }>
+): string {
+  if (!citations.length) return text;
+  const citationMap = new Map(citations.map((c) => [c.index, c]));
+  return text.replace(/\[(\d+)\]/g, (match, numStr) => {
+    const idx = parseInt(numStr, 10);
+    const citation = citationMap.get(idx);
+    if (!citation) return match;
+    return `[◆](${citation.url} "${citation.title}")`;
+  });
+}
+
+const MarkdownMessage = memo(function MarkdownMessage({
+  content,
+  citations,
+}: {
+  content: string;
+  citations?: Array<{ index: number; title: string; url: string }>;
+}) {
   const normalizedContent = useMemo(() => normalizeMarkdownContent(content), [content]);
+  const citeList = citations ?? [];
+  const processedContent = useMemo(
+    () => injectCitationLinks(normalizedContent, citeList),
+    [normalizedContent, citeList]
+  );
 
   return (
     <ReactMarkdown
@@ -424,9 +452,29 @@ const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: st
 
           return <CodeBlock code={code} language={language} />;
         },
+        a({ href, title, children, ...props }) {
+          const text = String(children);
+          if (text === '◆') {
+            return (
+              <a
+                className="citation-pill"
+                href={href}
+                title={title}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={title ?? '来源'}
+              />
+            );
+          }
+          return (
+            <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+              {children}
+            </a>
+          );
+        },
       }}
     >
-      {normalizedContent}
+      {processedContent}
     </ReactMarkdown>
   );
 });
@@ -1057,6 +1105,8 @@ export default function ChatWindow({
   onAcceptInlineCandidate,
   onDeferInlineCandidate,
   onDismissInlineCandidate,
+  searchStatus,
+  citations,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const lastErrorMessageRef = useRef('');
@@ -1504,13 +1554,20 @@ export default function ChatWindow({
                           {elapsedSeconds > 0 ? ` ${elapsedSeconds}s` : ''}
                         </span>
                       )}
-                      {streamingContent && <MarkdownMessage content={streamingContent} />}
+                      {streamingContent && <MarkdownMessage content={streamingContent} citations={citations} />}
                     </div>
                   </div>
                 </article>
               )}
             </div>
           </div>
+          {searchStatus.status && isStreaming && (
+            <SearchIndicator
+              status={searchStatus.status}
+              query={searchStatus.query}
+              urls={searchStatus.urls}
+            />
+          )}
           <div className="chat-composer-dock">
             <ChatInput
               onSend={onSend}

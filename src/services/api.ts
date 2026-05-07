@@ -476,7 +476,9 @@ export async function sendMessage(
   onChunk: (content: string) => void,
   onConversationId: (id: string) => void,
   onError: (error: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onSearchStatus?: (status: { search_status: string; query?: string; urls?: string[] }) => void,
+  onCitations?: (citations: Array<{ index: number; title: string; url: string }>) => void
 ): Promise<void> {
   const formData = new FormData();
   formData.append('message', message);
@@ -544,6 +546,12 @@ export async function sendMessage(
         }
         if (parsed.error) {
           onError(parsed.error);
+        }
+        if (parsed.search_status) {
+          onSearchStatus?.(parsed);
+        }
+        if (parsed.citations) {
+          onCitations?.(parsed.citations);
         }
       } catch {
         // skip malformed JSON

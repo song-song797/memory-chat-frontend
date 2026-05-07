@@ -12,6 +12,7 @@ import MemorySettingsPanel from './components/settings/MemorySettingsPanel';
 import SettingsCenter, { type SettingsSectionId } from './components/settings/SettingsCenter';
 import Sidebar from './components/Sidebar';
 import SignUpScreen from './components/SignUpScreen';
+import SearchIndicator from './components/SearchIndicator';
 import { message as toast } from './services/message';
 import * as api from './services/api';
 import type {
@@ -169,6 +170,12 @@ export default function App() {
   const [isMemoryMutating, setIsMemoryMutating] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isClearingConversations, setIsClearingConversations] = useState(false);
+  const [searchStatus, setSearchStatus] = useState<{
+    status: 'searching' | 'results' | null;
+    query?: string;
+    urls?: string[];
+  }>({ status: null });
+  const [citations, setCitations] = useState<Array<{ index: number; title: string; url: string }>>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
   });
@@ -1231,7 +1238,24 @@ export default function App() {
             setErrorMessage(error);
             console.error('Stream error:', error);
           },
-          abortController.signal
+          abortController.signal,
+          (searchEvent) => {
+            if (searchEvent.search_status === 'searching') {
+              setSearchStatus({
+                status: 'searching',
+                query: searchEvent.query,
+              });
+            } else if (searchEvent.search_status === 'results') {
+              setSearchStatus((prev) => ({
+                status: 'results',
+                urls: searchEvent.urls,
+                query: searchEvent.query ?? prev.query,
+              }));
+            }
+          },
+          (citations) => {
+            setCitations(citations);
+          }
         );
       } catch (err) {
         if (!(err instanceof Error && err.name === 'AbortError' && stopRequestedRef.current)) {
@@ -1244,6 +1268,8 @@ export default function App() {
         stopRequestedRef.current = false;
         setIsStreaming(false);
         setStreamingStartedAt(null);
+        setSearchStatus({ status: null });
+        setCitations([]);
         setStreamingContent('');
         revokeAttachmentUrls(tempUserMsg.attachments);
 
@@ -1447,6 +1473,8 @@ export default function App() {
         isModelPickerOpen={isModelPickerOpen}
         inlineCandidate={inlineCandidate}
         isMemoryMutating={isMemoryMutating}
+        searchStatus={searchStatus}
+        citations={citations}
         onSend={handleSend}
         onStopStreaming={handleStopStreaming}
         onToggleModelPicker={handleToggleModelPicker}

@@ -148,3 +148,9 @@ export interface ComposerAttachment {
   size_bytes: number;
   preview_url?: string;
 }
+
+export interface SearchStatus {
+  status: 'searching' | 'results' | null;
+  query?: string;
+  urls?: string[];
+}
